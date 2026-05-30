@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Glide Screenshots</title>
+  <link rel="stylesheet" href="/static/glide-tokens.css">
+  <style>
+    html, body { height: 100%; margin: 0; padding: 0; background: #07090c; }
+    #app-root { height: 100%; position: relative; overflow: hidden; }
+  </style>
+</head>
+<body>
+  <div id="app-root"></div>
+  <script src="/static/react.min.js"></script>
+  <script src="/static/react-dom.min.js"></script>
+  <script src="/static/babel.min.js"></script>
+  <script src="/static/ws.js"></script>
+  <script type="text/babel" src="/static/glide-ui.jsx"></script>
+  <script type="text/babel" src="/static/glide-desktop.jsx"></script>
+  <script type="text/babel" src="/static/glide-controller.jsx"></script>
+  <script type="text/babel" src="/static/glide-connect.jsx"></script>
+  <script type="text/babel">
+    const p = new URLSearchParams(location.search);
+    const scene = p.get('scene') || 'waiting';
+    const root = ReactDOM.createRoot(document.getElementById('app-root'));
+    if (scene === 'waiting')    root.render(<DesktopPopup connected={false} />);
+    if (scene === 'connected')  root.render(<DesktopPopup connected={true} device="iPhone 15 Pro" />);
+    if (scene === 'connect')    root.render(<GlideConnect startStep="pair" device="Living-Room PC" auto={false} />);
+    if (scene === 'controller') root.render(<GlideController device="Living-Room PC" />);
+  </script>
+</body>
+</html>

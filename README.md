@@ -1,695 +1,315 @@
-# Glide HTPC Remote — System Documentation
+# Glide — HTPC Remote Control
 
-> Living architecture document. Generated during initial build. Update as the system evolves.
+> Turn any phone into a polished remote for your home theatre PC.  
+> Scan a QR code. No app install. No pairing codes. Just works.
 
----
-
-## Table of Contents
-
-- [1. System Overview](#1-system-overview)
-- [2. Component Architecture](#2-component-architecture)
-- [3. Connection Flow](#3-connection-flow)
-- [4. Input Backend — X11 vs Wayland](#4-input-backend--x11-vs-wayland)
-- [5. WebSocket Protocol](#5-websocket-protocol)
-- [6. Mobile UI — Screen Breakdown](#6-mobile-ui--screen-breakdown)
-- [7. Trackpad Touch Logic](#7-trackpad-touch-logic)
-- [8. Scroll Strip](#8-scroll-strip)
-- [9. Drawer System](#9-drawer-system)
-- [10. GTK Overlay — HTPC Screen Popup](#10-gtk-overlay--htpc-screen-popup)
-- [11. Shared State — Overlay ↔ Server](#11-shared-state--overlay--server)
-- [12. Project File Structure](#12-project-file-structure)
-- [13. Debian Package](#13-debian-package)
-- [14. postinst — What Happens on Install](#14-postinst--what-happens-on-install)
-- [15. systemd User Service](#15-systemd-user-service)
-- [16. Build & Release](#16-build--release)
-- [17. Deploy to HTPC](#17-deploy-to-htpc)
-- [18. App Launcher Configuration](#18-app-launcher-configuration)
-- [19. Logs & Troubleshooting](#19-logs--troubleshooting)
-- [20. Key Design Decisions](#20-key-design-decisions)
+![Glide HTPC popup](docs/screen-htpc-waiting.png)
 
 ---
 
-## 1. System Overview
+## What it does
 
-Glide is a self-hosted HTPC remote control system. The HTPC runs a Python server as a systemd user service. On boot it displays a GTK popup showing a QR code. Scanning the code with a phone opens the Glide web UI in any browser — no app install required. The phone and HTPC communicate over a WebSocket on the local network. The server translates incoming messages into real mouse and keyboard events using the appropriate driver for the active display server (X11 or Wayland).
+Glide runs as a **systemd user service** on your HTPC (Pop!\_OS / Debian). When you log in, a glassmorphic popup appears on screen showing a QR code. Scan it with your phone — any browser on the same network will do — and you're in control. The popup disappears, your phone becomes the remote.
 
-```mermaid
-graph TD
-    subgraph HTPC ["HTPC — Pop!_OS / Debian"]
-        OV["GTK QR Overlay\n(disappears on connect)"]
-        SRV["FastAPI Server\nport 8765"]
-        WS_SRV["WebSocket Handler"]
-        INPUT["Input Backend\npynput · evdev"]
-        OS["X11 / Wayland\n(display server)"]
-    end
-
-    subgraph PHONE ["Phone — any browser, same LAN"]
-        QR["Scan QR code"]
-        UI["Glide Web UI\nReact + Babel"]
-        WS_CLIENT["WebSocket Client"]
-    end
-
-    QR -->|"opens browser"| UI
-    UI --> WS_CLIENT
-    WS_CLIENT <-->|"ws://192.168.x.x:8765/ws"| WS_SRV
-    WS_SRV --> SRV
-    SRV --> INPUT
-    INPUT --> OS
-    OV -->|"hides when\nclient connects"| SRV
-```
+- **Trackpad** with tap-to-click and a dedicated scroll strip (no flaky two-finger gestures)
+- **Media controls** — play/pause, seek ±10s, next/prev, volume, mute, fullscreen
+- **D-pad navigation** for Kodi, Netflix, anything full-screen
+- **App launcher** — one tap to open Jellyfin, Plex, Kodi, Spotify, YouTube, browser
+- **Text input** — native mobile keyboard, sends text directly to the focused field
+- **Tune panel** — adjust pointer speed, scroll speed, and screen brightness from the remote
+- **X11 and Wayland** — auto-detected at startup, no config needed
 
 ---
 
-## 2. Component Architecture
+## Screenshots
 
-The server process runs two concurrent threads. The GTK overlay occupies the main thread (GTK's requirement). FastAPI / uvicorn runs in a daemon thread with its own asyncio event loop. They share an `AppState` object protected by a threading lock. GTK updates are always scheduled via `GLib.idle_add` to keep them on the main thread.
+<table>
+<tr>
+<td align="center" width="50%">
 
-```mermaid
-graph TD
-    subgraph PROCESS ["Python process — run.py"]
-        direction TB
+**HTPC — waiting for connection**
 
-        subgraph MAIN ["Main thread"]
-            GTK["GTK3 Overlay\nGLib main loop\nBlocks until window closed"]
-        end
+![QR popup](docs/screen-htpc-waiting.png)
 
-        subgraph DAEMON ["Daemon thread — uvicorn"]
-            direction TB
-            ASGI["FastAPI ASGI app"]
-            WS_EP["WebSocket endpoint\n/ws"]
-            STATIC["StaticFiles\n/ → web/"]
-            QR_EP["GET /qr.png"]
-            HEALTH["GET /health"]
-        end
+*Appears on login. Scan or type the URL.*
 
-        STATE["AppState\nclient_count · server_url\nthreading.Lock"]
-    end
+</td>
+<td align="center" width="50%">
 
-    GTK <-->|"GLib.idle_add callbacks"| STATE
-    ASGI --> WS_EP & STATIC & QR_EP & HEALTH
-    WS_EP -->|"client_connected()\nclient_disconnected()"| STATE
-    STATE -->|"subscribe callbacks"| GTK
-```
+**HTPC — phone connected**
 
----
+![Connected](docs/screen-htpc-connected.png)
 
-## 3. Connection Flow
+*Confirms which device took control. Auto-hides.*
 
-```mermaid
-sequenceDiagram
-    participant HTPC as HTPC (server)
-    participant OV   as GTK Overlay
-    participant PH   as Phone (browser)
+</td>
+</tr>
+<tr>
+<td align="center" width="50%">
 
-    HTPC->>HTPC: Detect local IP
-    HTPC->>HTPC: Generate QR → http://192.168.x.x:8765
-    HTPC->>OV: Show QR popup on screen
-    Note over OV: "Waiting for connection…"
+**Phone — trackpad view**
 
-    PH->>PH: Camera scans QR
-    PH->>HTPC: HTTP GET / (web UI)
-    HTPC-->>PH: index.html + static assets
-    PH->>HTPC: WebSocket upgrade → /ws
-    HTPC-->>PH: {"type":"connected"}
-    HTPC->>OV: client_connected() → hide overlay
+![Controller](docs/screen-phone-controller.png)
 
-    Note over PH,HTPC: Real-time control via WebSocket
+*Drag to move. Tap to click. Right strip scrolls.*
 
-    PH-->>HTPC: {"type":"mouse_move","dx":5,"dy":-3}
-    HTPC->>HTPC: pynput / evdev → move cursor
-    PH-->>HTPC: {"type":"key","key":"play_pause"}
-    HTPC->>HTPC: XF86AudioPlay keypress
+</td>
+<td align="center" width="50%">
 
-    PH->>PH: Browser closed / navigated away
-    HTPC->>HTPC: WebSocket disconnect
-    HTPC->>OV: client_disconnected() → show QR again
-```
+**Phone — media controls**
 
----
+![Media drawer](docs/screen-phone-media.png)
 
-## 4. Input Backend — X11 vs Wayland
+*Swipe up or tap ⊞ to open. Prev / seek / play / seek / next + volume.*
 
-The backend is selected once at startup by reading `$XDG_SESSION_TYPE`. Both backends expose the same abstract interface so the rest of the server never needs to know which one is active.
+</td>
+</tr>
+<tr>
+<td align="center" width="50%">
 
-```mermaid
-flowchart TD
-    START["server/input/__init__.py\nget_backend()"]
-    ENV{"XDG_SESSION_TYPE?"}
-    X11["X11Backend\nserver/input/x11.py\npynput"]
-    WAY_CHECK{"evdev importable AND\n/dev/uinput accessible?"}
-    WAY["WaylandBackend\nserver/input/wayland.py\nevdev · UInput"]
-    FALLBACK["X11Backend via XWayland\n(fallback with warning)"]
+**Phone — app launcher**
 
-    START --> ENV
-    ENV -->|"x11"| X11
-    ENV -->|"wayland"| WAY_CHECK
-    WAY_CHECK -->|"Yes"| WAY
-    WAY_CHECK -->|"No"| FALLBACK
-```
+![Apps drawer](docs/screen-phone-apps.png)
 
-### X11 Backend — key mapping
+*One tap launches Jellyfin, Plex, Kodi, Netflix, YouTube, Spotify, or browser.*
 
-Uses pynput with raw XF86 keysyms so media keys work across all desktop environments regardless of theme or shortcut config.
+</td>
+<td align="center" width="50%">
 
-| Action | XF86 Keysym | Hex |
-|---|---|---|
-| Play / Pause | XF86AudioPlay | `0x1008FF14` |
-| Stop | XF86AudioStop | `0x1008FF15` |
-| Next | XF86AudioNext | `0x1008FF17` |
-| Previous | XF86AudioPrev | `0x1008FF16` |
-| Volume Up | XF86AudioRaiseVolume | `0x1008FF13` |
-| Volume Down | XF86AudioLowerVolume | `0x1008FF11` |
-| Mute | XF86AudioMute | `0x1008FF12` |
-| Seek Back | XF86AudioRewind | `0x1008FF3E` |
-| Seek Forward | XF86AudioForward | `0x1008FF97` |
-| Sleep | XF86Sleep | `0x1008FF2F` |
-| Fullscreen | F11 | — |
+**Phone — connecting**
 
-### Wayland Backend — uinput setup
+![Connecting](docs/screen-phone-connect.png)
 
-Creates a virtual `/dev/uinput` device at startup using `evdev.UInput`. The device is named `htpc-remote` and advertises exactly the capabilities it uses (EV_REL for mouse, EV_KEY for all button/key actions). The postinst script adds the user to the `input` group and installs a udev rule so the device is accessible without root.
+*What you see the moment you open the URL. WebSocket connects automatically.*
 
-```
-/etc/udev/rules.d/99-htpc-remote.rules:
-KERNEL=="uinput", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"
-```
-
-### Text input strategy
-
-| Session | Method | Fallback |
-|---|---|---|
-| X11 | `pynput.keyboard.Controller.type()` | — |
-| Wayland | `wtype <text>` | `ydotool type` → clipboard paste via `wl-copy` + Ctrl+V |
+</td>
+</tr>
+</table>
 
 ---
 
-## 5. WebSocket Protocol
+## Requirements
 
-All messages are JSON. The phone sends, the server receives and acts. The server sends only one message (welcome on connect).
-
-### Phone → Server
-
-| `type` | Fields | Action |
-|---|---|---|
-| `mouse_move` | `dx: float, dy: float` | Move cursor by relative delta |
-| `mouse_click` | `button: "left" \| "right" \| "middle"` | Single click |
-| `scroll` | `dy: float` | Scroll — positive = down, negative = up |
-| `key` | `key: string` | Press a named key (see table below) |
-| `text` | `text: string` | Type a string via keyboard |
-| `launch` | `app: string` | Launch an app by name |
-
-### Named keys
-
-| `key` value | Action |
+| | |
 |---|---|
-| `play_pause` | Toggle playback |
-| `stop` | Stop playback |
-| `next` / `prev` | Skip track |
-| `seek_fwd` / `seek_back` | Seek ±10 s |
-| `volume_up` / `volume_down` | Volume step |
-| `mute` | Toggle mute |
-| `fullscreen` | F11 |
-| `up` / `down` / `left` / `right` | Arrow keys |
-| `ok` | Enter |
-| `esc` | Escape |
-| `tab` | Tab |
-| `backspace` | Backspace |
-| `enter` | Enter / Return |
-| `sleep` | System sleep |
+| **HTPC OS** | Pop!\_OS 22.04 or any Debian/Ubuntu ≥ 20.04 |
+| **Display server** | X11 or Wayland (auto-detected) |
+| **Python** | 3.9+ |
+| **Phone** | Any browser on the same network — iOS Safari, Android Chrome, anything |
 
-### Server → Phone
-
-```json
-{ "type": "connected" }
-```
-
-Sent immediately on WebSocket handshake. Reserved for future server-push events (volume level sync, track info, etc.).
-
-### Bandwidth optimisation
-
-Mouse move messages are batched client-side using `requestAnimationFrame`. All pointer events within a single frame are accumulated into one delta pair and sent as a single message — effectively capping the send rate at the screen refresh rate (~60 fps) regardless of how fast `pointermove` fires.
-
----
-
-## 6. Mobile UI — Screen Breakdown
-
-The UI is a React 18 app transpiled in-browser by Babel standalone (no build step). All dependencies (React, ReactDOM, Babel) are served locally from `/static/` so the app works fully offline on the LAN.
+Runtime packages installed automatically by the `.deb`:
 
 ```
-┌─────────────────────────────────────┐
-│ ● Living-Room PC    connected · ms  │  ← Header (status dot + device name)
-│                                  🔗 │
-├──────────────────────────┬──────────┤
-│                          │  ↑       │
-│                          │  ─────   │
-│    Trackpad              │  ─────   │  ← Scroll strip (right side)
-│    (flex: 1)             │  ─────   │
-│                          │  ─────   │
-│    Drag to move          │  ─────   │
-│    tap = click           │  ↓       │
-│    hold = right-click    │ SCROLL   │
-├──────┬──────┬────────────┴──────────┤
-│ Left │ Mid  │         Right         │  ← Click buttons
-├──────┴──────┴───────────────────────┤
-│           ────── (handle)           │  ← Swipe-up / tap to open drawer
-├─────┬──────┬──────┬──────┬──────────┤
-│  ⌨  │  ▶  │  🔉  │  🔊  │   ⊞     │  ← Quick action bar
-└─────┴──────┴──────┴──────┴──────────┘
+python3-gi  python3-gi-cairo  gir1.2-gtk-3.0  xdotool
 ```
 
-### Screens
+Optional (recommended for Wayland text input):
 
-| Screen | Trigger | Description |
-|---|---|---|
-| **Connecting** | Page load (WS not yet open) | Spinner + "reaching host" |
-| **Connected** | WS handshake succeeds | Tick animation, 1.3 s then advances |
-| **Controller** | After connected animation | Full remote UI |
-| **Reconnecting** | WS drops mid-session | Status dot turns amber, no UI interruption |
-
----
-
-## 7. Trackpad Touch Logic
-
-The trackpad uses Pointer Events (works for both mouse and touch). `touch-action: none` is set on the element to prevent the browser consuming touch events for scroll or zoom.
-
-```mermaid
-flowchart TD
-    DOWN["pointerdown\nRecord start position\nStart 500ms long-press timer"]
-    MOVE["pointermove\nCalculate incremental delta\nApply sensitivity multiplier"]
-    MOVED{"Total movement\n> 6px?"}
-    CANCEL_TIMER["Cancel long-press timer"]
-    SEND_MOVE["WS.queueMove(dx, dy)\n(batched via rAF)"]
-    UP["pointerup"]
-    MOVED_Q{"Did finger move?"}
-    TAP["Send mouse_click left\nShow ripple animation"]
-    LONG["Long-press timer fires\nSend mouse_click right\nVibrate 30ms"]
-
-    DOWN --> MOVE
-    MOVE --> MOVED
-    MOVED -->|"Yes"| CANCEL_TIMER --> SEND_MOVE --> MOVE
-    MOVED -->|"No"| MOVE
-    MOVE --> UP
-    UP --> MOVED_Q
-    MOVED_Q -->|"No — was a tap"| TAP
-    MOVED_Q -->|"Yes — was a drag"| END["Nothing (already sent moves)"]
-    DOWN -->|"500ms with no move"| LONG
 ```
-
-### Sensitivity
-
-Pointer sensitivity is a multiplier applied to the raw pixel delta before sending. Default is 2.0×. Adjustable from the **Tune** drawer (0.5× – 4.0× range). The value is stored in `window.HTPC.sensitivity` client-side — no server round-trip needed.
-
----
-
-## 8. Scroll Strip
-
-A dedicated vertical strip on the right side of the trackpad replaces the unreliable two-finger scroll gesture (which mobile browsers intercept for pinch-zoom). The strip tracks single-finger drag and sends `scroll` events proportional to movement. A visual thumb indicator follows the finger.
-
-```mermaid
-flowchart LR
-    DRAG["Finger drags on scroll strip"]
-    DELTA["dy = currentY - lastY"]
-    SPEED["Apply window.HTPC.scrollSpeed multiplier"]
-    QUEUE["WS.queueScroll(dy)\n(batched via rAF)"]
-    TOAST["Accumulate dy\n± 26px threshold → flash toast\n'Scroll ↑' / 'Scroll ↓'"]
-
-    DRAG --> DELTA --> SPEED --> QUEUE
-    DELTA --> TOAST
+wtype  brightnessctl
 ```
 
 ---
 
-## 9. Drawer System
+## Install
 
-Swiping up from the pill handle (or tapping it) opens a frosted-glass sheet anchored to the bottom of the screen. The sheet contains four tabs.
+### Option A — pre-built `.deb` (recommended)
 
-```mermaid
-flowchart TD
-    HANDLE["Tap pill / swipe up"]
-    DRAWER["Bottom drawer — max 72% height\nfrosted glass · rounded top corners"]
+Download the latest release and copy it to your HTPC:
 
-    subgraph TABS
-        direction LR
-        MEDIA["Media\nPlayback controls\nVolume slider\nStop · Fullscreen"]
-        NAV["Nav\nD-pad (↑↓←→ + OK)\nBack · Fullscreen"]
-        APPS["Apps\n4×2 icon grid\nJellyfin · Plex · Kodi\nNetflix · YouTube\nSpotify · Browser"]
-        TUNE["Tune\nRemote brightness\nPointer speed\nScroll speed\nSleep / Power off"]
-    end
+```bash
+# From your Mac/PC
+scp htpc-remote_1.0.1_all.deb darren@192.168.1.x:/home/darren/
 
-    HANDLE --> DRAWER
-    DRAWER --> TABS
+# On the HTPC
+sudo apt install ./htpc-remote_1.0.1_all.deb
 ```
 
-### App launcher
+The installer will:
+1. Create a Python virtual environment at `/opt/htpc-remote/venv`
+2. Install FastAPI, uvicorn, pynput (X11) or evdev (Wayland)
+3. Add a udev rule so the Wayland backend can write to `/dev/uinput`
+4. Enable the systemd user service for auto-start on login
 
-Tapping an app icon sends `{ "type": "launch", "app": "jellyfin" }`. The server resolves the app name against `APP_COMMANDS` in `server/input/base.py` and launches via `subprocess.Popen(..., start_new_session=True)`. The session is detached so it survives even if the server restarts.
+Log out and back in (or reboot). The popup will appear on your next login.
 
-```python
-APP_COMMANDS = {
-    "jellyfin": "xdg-open http://localhost:8096",
-    "plex":     "xdg-open https://app.plex.tv",
-    "kodi":     ["kodi", "flatpak run tv.kodi.Kodi"],   # tries in order
-    "netflix":  "xdg-open https://www.netflix.com",
-    "youtube":  "xdg-open https://www.youtube.com",
-    "spotify":  ["spotify", "flatpak run com.spotify.Client"],
-    "browser":  ["xdg-open https://", "firefox", "chromium-browser"],
-}
+### Option B — build the `.deb` yourself
+
+You need Docker installed on your build machine:
+
+```bash
+git clone https://github.com/dnaidoo621/htpc-remote
+cd htpc-remote
+bash build-deb.sh          # produces htpc-remote_1.0.0_all.deb
+bash build-deb.sh 1.0.1    # custom version
 ```
+
+The build runs inside `debian:bookworm-slim` so your host OS doesn't matter.
 
 ---
 
-## 10. GTK Overlay — HTPC Screen Popup
+## Usage
 
-The overlay is a GTK3 borderless window that stays above all other windows (`set_keep_above(True)`). It renders the QR code using a GdkPixbuf loaded from the PNG generated by the `qrcode` library. When a phone connects the overlay hides. When all phones disconnect it reappears and regenerates the QR.
+### Connecting from your phone
 
-```mermaid
-stateDiagram-v2
-    [*] --> Visible : server starts
-    Visible --> Hidden : client_connected() fires
-    Hidden --> Visible : client_disconnected() AND client_count == 0
-    Visible --> [*] : window closed by user
-```
+Once the service is running you'll see the QR popup on your TV/monitor. You have two options:
 
-### Fallback
+- **Scan the QR code** with your phone camera — it opens the URL automatically
+- **Type the URL** shown under the code (e.g. `glide.local:7000` or `192.168.1.42:7000`) into any browser
 
-If `python3-gi` (PyGObject) is not available the overlay module falls back to printing the URL to stdout and blocking on `time.sleep(1)`. The URL still appears in `journalctl` and the WebSocket server still works — only the on-screen popup is missing.
+The popup disappears once your phone connects. To reconnect, reload the browser tab.
 
----
+### Controls at a glance
 
-## 11. Shared State — Overlay ↔ Server
-
-```mermaid
-sequenceDiagram
-    participant WS as WebSocket handler (async)
-    participant STATE as AppState (thread-safe)
-    participant GTK as GTK overlay (main thread)
-
-    WS->>STATE: client_connected()
-    STATE->>STATE: _client_count += 1 (under Lock)
-    STATE->>GTK: notify callbacks → GLib.idle_add(overlay.hide)
-    GTK->>GTK: window.hide() — runs safely on main thread
-
-    WS->>STATE: client_disconnected()
-    STATE->>STATE: _client_count -= 1 (under Lock)
-    STATE->>GTK: notify callbacks → GLib.idle_add(overlay.show_all)
-    GTK->>GTK: reload QR + window.show_all()
-```
-
-`GLib.idle_add` is the standard GTK mechanism for scheduling work from a non-GTK thread onto the GTK main loop. Without it, calling GTK methods from the uvicorn thread would cause race conditions or crashes.
-
----
-
-## 12. Project File Structure
-
-```
-htpc-remote/
-│
-├── run.py                          Entry point
-│
-├── server/
-│   ├── main.py                     Wires backend, state, overlay, uvicorn
-│   ├── app.py                      FastAPI app — routes + WebSocket handler
-│   ├── state.py                    AppState (thread-safe, pub/sub callbacks)
-│   ├── network.py                  Local IP detection, QR PNG generation
-│   ├── overlay.py                  GTK3 QR popup + terminal fallback
-│   └── input/
-│       ├── __init__.py             Backend factory — reads XDG_SESSION_TYPE
-│       ├── base.py                 Abstract InputBackend + APP_COMMANDS
-│       ├── x11.py                  pynput implementation (XF86 keysyms)
-│       └── wayland.py              evdev/UInput implementation
-│
-├── web/
-│   ├── index.html                  React shell — loads all static assets
-│   └── static/
-│       ├── glide-tokens.css        Design tokens (OLED dark, Pop!_OS teal)
-│       ├── glide-ui.jsx            Icon set (GIcon) + GSlider primitive
-│       ├── glide-connect.jsx       Connect flow: connecting → connected → controller
-│       ├── glide-controller.jsx    Full controller UI — all WS calls wired
-│       ├── ws.js                   WebSocket manager + HTPC config object
-│       ├── react.min.js            React 18 UMD (served locally — offline safe)
-│       ├── react-dom.min.js        ReactDOM 18 UMD
-│       └── babel.min.js            Babel standalone (in-browser JSX transform)
-│
-├── packaging/
-│   └── DEBIAN/
-│       ├── control                 Package metadata + dependencies
-│       ├── postinst                Post-install: venv, udev, input group, service enable
-│       ├── prerm                   Pre-remove: stop + disable service
-│       └── postrm                  Post-remove: purge /opt/htpc-remote on purge
-│
-├── systemd/
-│   └── htpc-remote.service         Reference copy (the .deb installs to /usr/lib/systemd/user/)
-│
-├── build-deb.sh                    Builds .deb via debian:bookworm-slim Docker container
-├── requirements.txt                Python pip dependencies
-└── htpc-remote_x.y.z_all.deb      Pre-built package (latest)
-```
-
----
-
-## 13. Debian Package
-
-The `.deb` installs to three locations:
-
-| Path | Contents |
+| Gesture / button | Action |
 |---|---|
-| `/opt/htpc-remote/` | All application files (server, web, venv created by postinst) |
-| `/usr/lib/systemd/user/htpc-remote.service` | systemd user service unit |
-| `/etc/udev/rules.d/99-htpc-remote.rules` | udev rule for `/dev/uinput` |
+| Drag on trackpad | Move mouse cursor |
+| Tap on trackpad | Left click |
+| Drag on scroll strip (right side) | Scroll |
+| ▶ / ⏸ quick button | Play / Pause |
+| 🔉 / 🔊 quick buttons | Volume down / up |
+| ⊞ button → Media tab | Full media controls + seek |
+| ⊞ button → Nav tab | D-pad + Back + Fullscreen |
+| ⊞ button → Apps tab | App launcher |
+| ⊞ button → Tune tab | Speed, brightness, sleep |
+| ⌨ button | Open keyboard for text input |
 
-### Package metadata
+---
 
-| Field | Value |
+## App launcher
+
+Out of the box the launcher supports:
+
+| App | How it opens |
 |---|---|
-| Package | `htpc-remote` |
-| Architecture | `all` (pure Python, no compiled extensions) |
-| Depends | `python3 (≥ 3.9)`, `python3-gi`, `python3-gi-cairo`, `gir1.2-gtk-3.0`, `xdotool` |
-| Pre-Depends | `python3-pip`, `python3-venv` |
-| Recommends | `wtype`, `brightnessctl` |
+| Jellyfin | `xdg-open http://localhost:8096` |
+| Plex | `xdg-open https://app.plex.tv` |
+| Kodi | `kodi` binary, or Flatpak fallback |
+| Netflix | `xdg-open https://www.netflix.com` |
+| YouTube | `xdg-open https://www.youtube.com` |
+| Spotify | `spotify` binary, or Flatpak fallback |
+| Browser | `firefox` → `chromium-browser` → `xdg-open` |
 
-`Pre-Depends` ensures pip and venv are available before postinst runs (postinst builds the virtualenv).
-
----
-
-## 14. postinst — What Happens on Install
-
-```mermaid
-flowchart TD
-    START["dpkg runs postinst as root"]
-
-    V["1. Create /opt/htpc-remote/venv\npython3 -m venv --system-site-packages\npip install -r requirements.txt"]
-
-    U["2. Detect logged-in user\nwho :0 → loginctl → /home fallback"]
-
-    G["3. usermod -aG input $USER\nWrite /etc/udev/rules.d/99-htpc-remote.rules\nudevadm trigger"]
-
-    E["4. systemctl --user --global enable htpc-remote\nCreates symlink in /etc/systemd/user/default.target.wants/\n→ starts for all users on every login"]
-
-    S["5. Start for current session (if user is already logged in)\nsu -l $USER 'systemctl --user restart htpc-remote'"]
-
-    START --> V --> U --> G --> E --> S
-```
-
-`--system-site-packages` on the venv lets it use the system-installed `python3-gi` (GTK bindings) without re-installing them via pip.
+To customise, edit `APP_COMMANDS` in `/opt/htpc-remote/server/input/base.py`.
 
 ---
 
-## 15. systemd User Service
+## Service management
 
-```ini
-[Unit]
-Description=HTPC Remote Control Server (Glide)
-After=network-online.target graphical-session.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-WorkingDirectory=/opt/htpc-remote
-ExecStart=/opt/htpc-remote/venv/bin/python /opt/htpc-remote/run.py
-Restart=on-failure
-RestartSec=5
-Environment="PYTHONUNBUFFERED=1"
-
-[Install]
-WantedBy=default.target
-```
-
-### Key points
-
-- **User service** — runs as the logged-in user automatically. No root. No hardcoded username.
-- `After=graphical-session.target` — waits for the display session to be fully initialised before starting. Guarantees `DISPLAY` / `WAYLAND_DISPLAY` and `XDG_SESSION_TYPE` are set.
-- `Restart=on-failure` — automatically recovers from crashes. `RestartSec=5` prevents a tight restart loop.
-- `WantedBy=default.target` — starts as part of the normal user session. Because postinst runs `--global enable`, this applies to every user on the machine.
-
-### Service lifecycle on auto-login HTPC
-
-```mermaid
-sequenceDiagram
-    participant GDM  as GDM (display manager)
-    participant SD   as systemd --user
-    participant SVC  as htpc-remote.service
-    participant GTK  as GTK overlay
-
-    GDM->>GDM: Auto-login triggers user session
-    GDM->>SD: Start user@1000.service
-    SD->>SD: Reach graphical-session.target
-    SD->>SVC: Start htpc-remote.service
-    SVC->>GTK: Show QR popup on HTPC screen
-    Note over GTK: "Scan to connect"
-```
-
----
-
-## 16. Build & Release
-
-The `build-deb.sh` script uses a `debian:bookworm-slim` Docker container to run `dpkg-deb`. This means the `.deb` is always built in a clean Debian environment regardless of what OS you're building on.
-
-```mermaid
-flowchart LR
-    SRC["Source files\n(server/ web/ packaging/)"]
-    SCRIPT["build-deb.sh"]
-    ASSEMBLE["Assemble .deb tree\n/opt/htpc-remote/\n/usr/lib/systemd/user/\n/etc/udev/rules.d/\nDEBIAN/ control scripts"]
-    DOCKER["docker run debian:bookworm-slim\ndpkg-deb --root-owner-group --build"]
-    DEB["htpc-remote_x.y.z_all.deb"]
-
-    SRC --> SCRIPT --> ASSEMBLE --> DOCKER --> DEB
-```
-
-### Cut a new release
+The service runs as your user, not root:
 
 ```bash
-# 1. Make your changes and commit
-git add . && git commit -m "description"
-
-# 2. Build the .deb (version argument optional, defaults to 1.0.0)
-bash build-deb.sh 1.1.0
-
-# 3. Commit the new .deb and push
-git add htpc-remote_1.1.0_all.deb packaging/DEBIAN/control
-git commit -m "Release 1.1.0"
-git push
-```
-
----
-
-## 17. Deploy to HTPC
-
-### First install
-
-```bash
-# From your dev machine
-scp htpc-remote_1.0.1_all.deb darren@192.168.10.158:~/Desktop/
-
-ssh darren@192.168.10.158 \
-  'echo "password" | sudo -S apt install -y ~/Desktop/htpc-remote_1.0.1_all.deb'
-```
-
-### Upgrade (in-place)
-
-```bash
-scp htpc-remote_1.1.0_all.deb darren@192.168.10.158:~/
-
-ssh darren@192.168.10.158 \
-  'echo "password" | sudo -S apt install -y ~/htpc-remote_1.1.0_all.deb'
-```
-
-`apt install ./file.deb` on an already-installed package performs an upgrade — postinst re-runs, the venv is rebuilt, and the service is restarted.
-
-### Uninstall
-
-```bash
-sudo apt remove htpc-remote       # removes package, keeps /opt/htpc-remote
-sudo apt purge  htpc-remote       # removes everything including /opt/htpc-remote
-```
-
----
-
-## 18. App Launcher Configuration
-
-The app list lives in `server/input/base.py` in the `APP_COMMANDS` dict. Values can be a single shell command string or a list (tried in order, first one whose binary exists is used).
-
-```python
-APP_COMMANDS: dict[str, str | list[str]] = {
-    "jellyfin": "xdg-open http://localhost:8096",
-    "plex":     "xdg-open https://app.plex.tv",
-    "kodi":     ["kodi", "flatpak run tv.kodi.Kodi"],
-    "netflix":  "xdg-open https://www.netflix.com",
-    "youtube":  "xdg-open https://www.youtube.com",
-    "spotify":  ["spotify", "flatpak run com.spotify.Client"],
-    "browser":  ["xdg-open https://", "firefox", "chromium-browser"],
-}
-```
-
-The UI app grid (`DrawerApps` in `glide-controller.jsx`) maps names to colours using `oklch` hues. To add a new app, add an entry to both `APP_COMMANDS` and the `APPS` array in the JSX:
-
-```javascript
-const APPS = [
-    ['J', 'Jellyfin',  285],  // [icon-letter, name, hue]
-    ['P', 'Plex',       60],
-    // ...
-    ['E', 'Emby',      160],  // new entry
-];
-```
-
-Then rebuild and redeploy.
-
----
-
-## 19. Logs & Troubleshooting
-
-### Common commands (run on the HTPC)
-
-```bash
-# Service status
+# Status
 systemctl --user status htpc-remote
-
-# Live logs
-journalctl --user -u htpc-remote -f
 
 # Restart
 systemctl --user restart htpc-remote
 
-# Check what session type is active
-echo $XDG_SESSION_TYPE
+# Live logs
+journalctl --user -u htpc-remote -f
 
-# Check uinput permissions (Wayland)
-ls -l /dev/uinput
-groups $USER | grep input
+# Disable auto-start
+systemctl --user disable htpc-remote
 ```
-
-### Troubleshooting guide
-
-| Symptom | Likely cause | Fix |
-|---|---|---|
-| QR popup doesn't appear | GTK not available or DISPLAY not set | Check `journalctl` for overlay error. Confirm `DISPLAY=:0` is in the process env. |
-| Phone can't reach the server | Firewall blocking port 8765 | `sudo ufw allow 8765` |
-| Mouse moves but wrong speed | Sensitivity too high/low | Adjust in Tune drawer on the phone |
-| Wayland: mouse doesn't move | User not in `input` group or uinput rule missing | Log out and back in after install. Check `/dev/uinput` permissions. |
-| Text input doesn't work on Wayland | `wtype` not installed | `sudo apt install wtype` |
-| Service doesn't start on login | Global enable didn't apply | `systemctl --user --global enable htpc-remote` |
-| App launcher does nothing | App binary not found on PATH | Check `APP_COMMANDS` for the app, ensure binary is installed |
 
 ---
 
-## 20. Key Design Decisions
+## X11 vs Wayland
 
-### No two-finger scroll
-Mobile browsers capture two-finger gestures for pinch-to-zoom. There is no reliable way to intercept them. The dedicated scroll strip on the right side of the trackpad uses single-finger drag instead, which is fully under the app's control.
+Glide detects `$XDG_SESSION_TYPE` at startup and loads the right backend automatically.
 
-### No app install required
-The phone UI is a standard browser page — no PWA manifest, no Play Store, no App Store. Any phone on the same network can connect by opening the QR URL.
+| | X11 | Wayland |
+|---|---|---|
+| Mouse / click | pynput | evdev / uinput |
+| Media keys | XF86 keysyms via pynput | Linux keycodes via evdev |
+| Text input | pynput type | wtype → ydotool → wl-copy |
+| Extra setup | None | `/dev/uinput` group (done by installer) |
 
-### React + Babel in-browser
-There is no build step. React, ReactDOM and Babel standalone are served as static files from the same Python server. This keeps the project deployable as a single `.deb` with no Node.js toolchain required. Babel transpiles the JSX at load time in the browser — acceptable for a LAN-only app where load time is measured in milliseconds.
+If you switch display servers, just restart the service — no reinstall needed.
 
-### React served locally (not CDN)
-CDN scripts were originally used but failed in network-restricted environments. All JS dependencies are bundled into `web/static/` so the app works fully offline once installed. The total added weight is ~3.3 MB (dominated by Babel standalone).
+---
 
-### User service, not system service
-A systemd user service runs as the logged-in user automatically with full access to the display session (`DISPLAY`, `XDG_SESSION_TYPE`, `XDG_RUNTIME_DIR`). A system service with a hardcoded `User=` would require knowing the username at package build time and would need explicit display environment injection.
+## Troubleshooting
 
-### Single abstraction layer for X11/Wayland
-Both backends implement the same `InputBackend` ABC. The selection happens once at startup via the factory in `__init__.py`. All upstream code (`app.py`, `main.py`) only ever holds a reference to `InputBackend` — switching display servers requires zero changes outside the `input/` package.
+**Popup doesn't appear on login**
 
-### GTK on the main thread
-GTK's main loop is not thread-safe. All GTK calls must happen on the thread that called `Gtk.main()`. Cross-thread communication to the overlay uses `GLib.idle_add()` which schedules the callback safely on the GTK event loop. uvicorn runs in a daemon thread with its own asyncio event loop and never touches GTK directly.
+```bash
+# Check the service
+systemctl --user status htpc-remote
+journalctl --user -u htpc-remote -b --no-pager
+```
+
+Most common cause: `DISPLAY` or `WAYLAND_DISPLAY` not set in the service environment. The installer sets these via `systemctl --user set-environment`, but a reboot usually fixes it.
+
+**Phone can't reach the server**
+
+- Make sure phone and HTPC are on the same network
+- Check the firewall: `sudo ufw allow 7000/tcp`
+- Confirm the service is listening: `ss -tlnp | grep 7000`
+
+**Wayland: mouse moves but keyboard/media keys don't work**
+
+```bash
+# Check uinput group
+groups $USER  # should include 'input'
+
+# If not, add and re-login
+sudo usermod -aG input $USER
+```
+
+**Text input (Wayland) doesn't work**
+
+Install `wtype`: `sudo apt install wtype`
+
+---
+
+## How it works
+
+```
+Phone browser  ──WebSocket──▶  FastAPI server (port 7000)
+                                       │
+                      ┌────────────────┴─────────────────┐
+                      ▼                                   ▼
+               X11 (pynput)                     Wayland (evdev/uinput)
+               XF86 keysyms                     Linux keycodes
+```
+
+The server translates incoming WebSocket messages into real input events using the active display server's native API. The GTK popup is driven by the same server via a shared state object — when a WebSocket client connects, the popup hides; when it disconnects, the popup reappears.
+
+Full architecture docs: [README.md §1–20](#table-of-contents)
+
+---
+
+## Build & project structure
+
+```
+htpc-remote/
+├── server/
+│   ├── app.py          FastAPI + WebSocket handler
+│   ├── overlay.py      GTK3 QR popup
+│   ├── main.py         Entry point (uvicorn thread + GTK main loop)
+│   └── input/
+│       ├── base.py     InputBackend ABC + APP_COMMANDS
+│       ├── x11.py      pynput backend
+│       └── wayland.py  evdev/uinput backend
+├── web/
+│   ├── index.html      Mobile UI entry point
+│   └── static/
+│       ├── glide-tokens.css     Design tokens (OLED dark, Pop!_OS teal)
+│       ├── glide-ui.jsx         Icon set + shared primitives
+│       ├── glide-connect.jsx    WS connection flow
+│       ├── glide-controller.jsx Full controller UI
+│       └── ws.js                WebSocket manager + rAF batching
+├── packaging/
+│   └── DEBIAN/
+│       ├── control     Package metadata
+│       ├── postinst    Install script (venv, udev, systemd)
+│       └── prerm       Clean uninstall
+└── build-deb.sh        One-command .deb builder (uses Docker)
+```
+
+---
+
+## Licence
+
+MIT. Do what you like with it.
