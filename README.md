@@ -11,6 +11,8 @@
 
 Glide runs as a **systemd user service** on your HTPC (Pop!\_OS / Debian). When you log in, a glassmorphic popup appears on screen showing a QR code. Scan it with your phone — any browser on the same network will do — and you're in control. The popup disappears, your phone becomes the remote.
 
+The popup is smart about when it comes back. Locking your phone, switching apps, or a brief network blip won't flash it up mid-film. It reappears on startup and again only after two hours of complete inactivity — useful for handing the remote to someone else.
+
 - **Trackpad** with tap-to-click and a dedicated scroll strip (no flaky two-finger gestures)
 - **Media controls** — play/pause, seek ±10s, next/prev, volume, mute, fullscreen
 - **D-pad navigation** for Kodi, Netflix, anything full-screen
@@ -157,7 +159,19 @@ Once the service is running you'll see the QR popup on your TV/monitor. You have
 - **Scan the QR code** with your phone camera — it opens the URL automatically
 - **Type the URL** shown under the code (e.g. `glide.local:7000` or `192.168.1.42:7000`) into any browser
 
-The popup disappears once your phone connects. To reconnect, reload the browser tab.
+The popup disappears once your phone connects. To reconnect, just reload the browser tab — the URL stays the same.
+
+**Popup behaviour**
+
+| Event | What happens |
+|---|---|
+| Service starts / login | Popup shows immediately |
+| Phone connects | Popup hides |
+| Phone locks or browser backgrounds | Nothing — popup stays hidden |
+| Phone reconnects (reload tab) | Nothing — popup stays hidden |
+| No device connected for 2 hours | Popup reappears automatically |
+
+The 2-hour window resets every time any device connects. To change it, set `HTPC_REMOTE_IDLE_TIMEOUT` (in seconds) in the service environment — see [Service management](#service-management) below.
 
 ### Controls at a glance
 
@@ -211,6 +225,23 @@ journalctl --user -u htpc-remote -f
 # Disable auto-start
 systemctl --user disable htpc-remote
 ```
+
+**Changing the idle timeout**
+
+The popup reappears after 2 hours of no connected devices by default. Override it with a drop-in:
+
+```bash
+systemctl --user edit htpc-remote
+```
+
+Add:
+
+```ini
+[Service]
+Environment=HTPC_REMOTE_IDLE_TIMEOUT=3600
+```
+
+Common values: `3600` = 1 hour · `7200` = 2 hours (default) · `0` = revert to old behaviour (popup on every disconnect)
 
 ---
 
@@ -274,9 +305,7 @@ Phone browser  ──WebSocket──▶  FastAPI server (port 7000)
                XF86 keysyms                     Linux keycodes
 ```
 
-The server translates incoming WebSocket messages into real input events using the active display server's native API. The GTK popup is driven by the same server via a shared state object — when a WebSocket client connects, the popup hides; when it disconnects, the popup reappears.
-
-Full architecture docs: [README.md §1–20](#table-of-contents)
+The server translates incoming WebSocket messages into real input events using the active display server's native API. The GTK overlay is driven by the same server via a shared state object — it hides the moment a WebSocket client connects, and shows on startup or after 2 hours of inactivity. Brief disconnects (phone lock, tab switch) are absorbed by a `GLib.timeout_add_seconds` timer that resets on every reconnect.
 
 ---
 
