@@ -1,0 +1,104 @@
+/* ───────────────────────────────────────────────────────────
+   Glide — design tokens
+   Apple-Remote glassy / premium · OLED-dark · Pop!_OS teal
+   ─────────────────────────────────────────────────────────── */
+:root {
+  /* surfaces — cool near-black */
+  --g-bg:        #07090c;   /* deepest — device canvas */
+  --g-bg-1:      #0c1015;   /* base under glass        */
+  --g-bg-2:      #11161d;   /* raised panel            */
+
+  /* glass fills (over dark) — tweakable */
+  --g-glass-a:      0.055;                          /* tint opacity  */
+  --g-blur:         22px;                            /* surface blur  */
+  --g-blur-lg:      calc(var(--g-blur) + 8px);       /* drawer / popup */
+  --g-glass:        rgba(255,255,255,var(--g-glass-a));
+  --g-glass-hi:     rgba(255,255,255,0.10);
+  --g-glass-press:  rgba(255,255,255,0.16);
+
+  /* hairlines / strokes */
+  --g-line:      rgba(255,255,255,0.10);
+  --g-line-soft: rgba(255,255,255,0.055);
+
+  /* text */
+  --g-text:   rgba(255,255,255,0.96);
+  --g-text-2: rgba(255,255,255,0.60);
+  --g-text-3: rgba(255,255,255,0.36);
+
+  /* accent — hue-driven (Pop!_OS teal default). Tweak --g-hue to re-tint everything. */
+  --g-hue:        192;
+  --g-accent:     oklch(0.82 0.115 var(--g-hue));
+  --g-accent-dim: oklch(0.82 0.115 var(--g-hue) / 0.16);
+  --g-accent-2:   oklch(0.74 0.12  var(--g-hue));
+  --g-glow:       oklch(0.82 0.13  var(--g-hue) / 0.45);
+
+  /* semantic */
+  --g-danger: oklch(0.70 0.16 25);   /* power / destructive */
+  --g-warn:   oklch(0.82 0.12 80);
+
+  /* radii */
+  --g-r-sm: 12px;
+  --g-r-md: 18px;
+  --g-r-lg: 26px;
+  --g-r-xl: 34px;
+  --g-r-pill: 999px;
+
+  /* type */
+  --g-ui:   -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  --g-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+
+  /* elevation */
+  --g-shadow-1: 0 2px 8px rgba(0,0,0,0.35);
+  --g-shadow-2: 0 10px 30px rgba(0,0,0,0.45);
+  --g-shadow-3: 0 24px 60px rgba(0,0,0,0.55);
+}
+
+/* glass surface recipe */
+.g-glass {
+  background: var(--g-glass);
+  backdrop-filter: blur(var(--g-blur)) saturate(160%);
+  -webkit-backdrop-filter: blur(var(--g-blur)) saturate(160%);
+  border: 0.75px solid var(--g-line);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.07), var(--g-shadow-1);
+}
+
+/* tactile press helper */
+.g-press { transition: transform .12s cubic-bezier(.2,.7,.3,1), background .12s, box-shadow .12s; }
+.g-press:active { transform: scale(0.955); background: var(--g-glass-press); }
+
+/* connection pulse */
+@keyframes g-pulse {
+  0%   { box-shadow: 0 0 0 0 var(--g-glow); }
+  70%  { box-shadow: 0 0 0 7px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+.g-live-dot { animation: g-pulse 2.4s ease-out infinite; }
+
+/* trackpad touch ripple */
+@keyframes g-ripple {
+  from { transform: translate(-50%,-50%) scale(0.3); opacity: 0.55; }
+  to   { transform: translate(-50%,-50%) scale(1);   opacity: 0; }
+}
+
+/* toast */
+@keyframes g-toast-in {
+  from { transform: translate(-50%, 14px); opacity: 0; }
+  to   { transform: translate(-50%, 0);    opacity: 1; }
+}
+
+/* drawer */
+@keyframes g-qr-fade { from { opacity:0 } to { opacity:1 } }
+@keyframes g-spin { to { transform: rotate(360deg); } }
+@keyframes g-pop { from { transform: scale(0.7); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@keyframes g-rise { from { transform: translateY(16px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+* { scrollbar-width: none; }
+*::-webkit-scrollbar { display: none; }
+
+.g-app, .g-app * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
+.g-app {
+  font-family: var(--g-ui);
+  color: var(--g-text);
+  -webkit-font-smoothing: antialiased;
+}
+.g-mono { font-family: var(--g-mono); font-variant-numeric: tabular-nums; }

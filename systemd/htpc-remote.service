@@ -1,0 +1,17 @@
+[Unit]
+Description=HTPC Remote Control Server
+After=network-online.target graphical-session.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/htpc-remote
+ExecStart=%h/htpc-remote/venv/bin/python run.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+Environment="PYTHONUNBUFFERED=1"
+
+[Install]
+WantedBy=default.target

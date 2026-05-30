@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#07090c">
+  <title>Glide Remote</title>
+  <link rel="stylesheet" href="/static/glide-tokens.css">
+  <style>
+    html, body, #app-root {
+      height: 100%; margin: 0; padding: 0;
+      background: var(--g-bg);
+      /* Safe area insets (notch / home indicator) */
+      padding-top:    env(safe-area-inset-top);
+      padding-bottom: env(safe-area-inset-bottom);
+      padding-left:   env(safe-area-inset-left);
+      padding-right:  env(safe-area-inset-right);
+    }
+    #app-root { position: relative; overflow: hidden; }
+  </style>
+</head>
+<body>
+  <div id="app-root"></div>
+
+  <!-- React 18 + Babel — served locally so the app works offline on the LAN -->
+  <script src="/static/react.min.js"></script>
+  <script src="/static/react-dom.min.js"></script>
+  <script src="/static/babel.min.js"></script>
+
+  <!-- WS manager — plain JS, must load before JSX -->
+  <script src="/static/ws.js"></script>
+
+  <!-- Design primitives (icons, slider) -->
+  <script type="text/babel" src="/static/glide-ui.jsx"></script>
+
+  <!-- Controller + connect flow -->
+  <script type="text/babel" src="/static/glide-controller.jsx"></script>
+  <script type="text/babel" src="/static/glide-connect.jsx"></script>
+
+  <!-- Bootstrap -->
+  <script type="text/babel">
+    const params = new URLSearchParams(location.search);
+    const debug  = params.get('debug'); // ?debug=controller | ?debug=connected | ?debug=connecting
+    const root   = ReactDOM.createRoot(document.getElementById('app-root'));
+    if (debug === 'controller') {
+      root.render(<GlideController device="Living-Room PC (preview)" />);
+    } else if (debug === 'connected') {
+      root.render(<GlideConnect device="Living-Room PC (preview)" />);
+      // patch WS to fire connect immediately
+      setTimeout(() => window.WS._dbgConnect && window.WS._dbgConnect(), 100);
+    } else {
+      root.render(<GlideConnect device="Living-Room PC" />);
+    }
+  </script>
+</body>
+</html>
