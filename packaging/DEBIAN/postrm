@@ -1,0 +1,10 @@
+#!/bin/bash
+set -e
+
+if [ "$1" = "purge" ]; then
+    echo "=== htpc-remote: purge ==="
+    rm -rf /opt/htpc-remote
+    rm -f  /etc/udev/rules.d/99-htpc-remote.rules
+    udevadm control --reload-rules 2>/dev/null || true
+    echo "  Purged all htpc-remote files."
+fi
