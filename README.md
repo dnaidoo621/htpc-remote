@@ -9,7 +9,7 @@
 
 ## What it does
 
-Glide runs as a **systemd user service** on your HTPC (Pop!\_OS / Debian). When you log in, a glassmorphic popup appears on screen showing a QR code. Scan it with your phone — any browser on the same network will do — and you're in control. The popup disappears, your phone becomes the remote.
+Glide runs as a background service on your HTPC (**Linux** or **Windows**). When you log in, a glassmorphic popup appears on screen showing a QR code. Scan it with your phone — any browser on the same network will do — and you're in control. The popup disappears, your phone becomes the remote.
 
 The popup is smart about when it comes back. Locking your phone, switching apps, or a brief network blip won't flash it up mid-film. It reappears on startup and again only after two hours of complete inactivity — useful for handing the remote to someone else.
 
@@ -19,7 +19,7 @@ The popup is smart about when it comes back. Locking your phone, switching apps,
 - **App launcher** — one tap to open Jellyfin, Plex, Kodi, Spotify, YouTube, browser
 - **Text input** — native mobile keyboard, sends text directly to the focused field
 - **Tune panel** — adjust pointer speed, scroll speed, and screen brightness from the remote
-- **X11 and Wayland** — auto-detected at startup, no config needed
+- **X11 and Wayland** — auto-detected at startup on Linux, no config needed
 
 ---
 
@@ -94,59 +94,78 @@ The popup is smart about when it comes back. Locking your phone, switching apps,
 
 | | |
 |---|---|
-| **HTPC OS** | Pop!\_OS 22.04 or any Debian/Ubuntu ≥ 20.04 |
-| **Display server** | X11 or Wayland (auto-detected) |
+| **HTPC OS** | Linux (Debian · Ubuntu · Fedora · Arch · openSUSE) or Windows 10/11 |
+| **Display server** | Linux: X11 or Wayland (auto-detected). Windows: native Win32 |
 | **Python** | 3.9+ |
 | **Phone** | Any browser on the same network — iOS Safari, Android Chrome, anything |
-
-Runtime packages installed automatically by the `.deb`:
-
-```
-python3-gi  python3-gi-cairo  gir1.2-gtk-3.0  xdotool
-```
-
-Optional (recommended for Wayland text input):
-
-```
-wtype  brightnessctl
-```
 
 ---
 
 ## Install
 
-### Option A — pre-built `.deb` (recommended)
+Download the latest release for your platform from the [**Releases page**](https://github.com/dnaidoo621/htpc-remote/releases/latest).
 
-Download the latest release and copy it to your HTPC:
+### Linux — Debian / Ubuntu (`.deb`)
 
 ```bash
-# From your Mac/PC
-scp htpc-remote_1.0.1_all.deb darren@192.168.1.x:/home/darren/
+sudo apt install ./htpc-remote_*_all.deb
+```
 
-# On the HTPC
-sudo apt install ./htpc-remote_1.0.1_all.deb
+Logs out and back in (or reboot). The QR popup appears on your next login.
+
+### Linux — Fedora / RHEL / openSUSE (`.rpm`)
+
+```bash
+sudo dnf install ./htpc-remote-*.noarch.rpm      # Fedora / RHEL
+sudo zypper install ./htpc-remote-*.noarch.rpm   # openSUSE
+```
+
+### Linux — Arch / Manjaro / other (`.tar.gz`)
+
+```bash
+tar xzf htpc-remote-*-linux.tar.gz
+cd htpc-remote-*
+bash install.sh
+```
+
+`install.sh` auto-detects your package manager (`apt` / `dnf` / `pacman` / `zypper`) and installs the right system packages before setting up the service.
+
+All Linux installers will:
+1. Create a Python virtual environment at `/opt/htpc-remote/venv`
+2. Install FastAPI, uvicorn, pynput, and evdev (Linux only)
+3. Add a udev rule so the Wayland backend can write to `/dev/uinput`
+4. Enable and start a systemd user service for auto-start on login
+
+### Windows (`.zip`)
+
+1. Download `htpc-remote-*-windows.zip` from the [Releases page](https://github.com/dnaidoo621/htpc-remote/releases/latest)
+2. Extract the ZIP anywhere
+3. Open PowerShell in that folder and run:
+
+```powershell
+Set-ExecutionPolicy Bypass -Scope Process -Force
+.\install-windows.ps1
 ```
 
 The installer will:
-1. Create a Python virtual environment at `/opt/htpc-remote/venv`
-2. Install FastAPI, uvicorn, pynput (X11) or evdev (Wayland)
-3. Add a udev rule so the Wayland backend can write to `/dev/uinput`
-4. Enable the systemd user service for auto-start on login
+1. Install Python 3.12 via `winget` if needed
+2. Copy the app to `%LOCALAPPDATA%\htpc-remote`
+3. Create a Python virtual environment and install dependencies
+4. Register a Task Scheduler task that starts Glide silently at login
 
-Log out and back in (or reboot). The popup will appear on your next login.
+A QR overlay window will appear immediately. No reboot or log-out needed.
 
-### Option B — build the `.deb` yourself
-
-You need Docker installed on your build machine:
+### Build from source (any platform, requires Docker)
 
 ```bash
 git clone https://github.com/dnaidoo621/htpc-remote
 cd htpc-remote
-bash build-deb.sh          # produces htpc-remote_1.0.0_all.deb
-bash build-deb.sh 1.0.1    # custom version
+
+bash build-deb.sh 1.0.2    # → htpc-remote_1.0.2_all.deb
+bash build-rpm.sh 1.0.2    # → htpc-remote-1.0.2-1.noarch.rpm
 ```
 
-The build runs inside `debian:bookworm-slim` so your host OS doesn't matter.
+Both build scripts run inside an isolated Docker container (`debian:bookworm-slim` / `fedora:latest`) so your host OS doesn't matter.
 
 ---
 
@@ -157,7 +176,7 @@ The build runs inside `debian:bookworm-slim` so your host OS doesn't matter.
 Once the service is running you'll see the QR popup on your TV/monitor. You have two options:
 
 - **Scan the QR code** with your phone camera — it opens the URL automatically
-- **Type the URL** shown under the code (e.g. `glide.local:7000` or `192.168.1.42:7000`) into any browser
+- **Type the URL** shown under the code (e.g. `192.168.1.42:8765`) into any browser
 
 The popup disappears once your phone connects. To reconnect, just reload the browser tab — the URL stays the same.
 
@@ -171,7 +190,19 @@ The popup disappears once your phone connects. To reconnect, just reload the bro
 | Phone reconnects (reload tab) | Nothing — popup stays hidden |
 | No device connected for 2 hours | Popup reappears automatically |
 
-The 2-hour window resets every time any device connects. To change it, set `HTPC_REMOTE_IDLE_TIMEOUT` (in seconds) in the service environment — see [Service management](#service-management) below.
+The 2-hour window resets every time any device connects. To change it, set `HTPC_REMOTE_IDLE_TIMEOUT` (in seconds) — see [Service management](#service-management) below.
+
+### Add Glide to your home screen (optional)
+
+The mobile UI is a **Progressive Web App**. Once you've opened it in your browser, you can save it as an icon on your phone so it's one tap away — no URL to remember, no browser chrome, just the remote.
+
+**Android (Chrome):**  
+Tap the three-dot menu → *Add to Home screen*. Or wait — Chrome often shows an install banner automatically after a few seconds.
+
+**iPhone / iPad (Safari):**  
+Tap the Share button (box with arrow) → *Add to Home Screen* → *Add*.
+
+The icon that appears is the Glide teal cursor mark. Opening it launches straight into the controller with no address bar.
 
 ### Controls at a glance
 
@@ -192,25 +223,23 @@ The 2-hour window resets every time any device connects. To change it, set `HTPC
 
 ## App launcher
 
-Out of the box the launcher supports:
+| App | Linux | Windows |
+|---|---|---|
+| Jellyfin | `xdg-open http://localhost:8096` | `os.startfile` → default browser |
+| Plex | `xdg-open https://app.plex.tv` | `os.startfile` → default browser |
+| Kodi | `kodi` binary, or Flatpak | `kodi.exe` if installed |
+| Netflix | `xdg-open https://www.netflix.com` | `os.startfile` → default browser |
+| YouTube | `xdg-open https://www.youtube.com` | `os.startfile` → default browser |
+| Spotify | `spotify` binary, or Flatpak | `spotify.exe` if installed |
+| Browser | `firefox` → `chromium-browser` | `msedge.exe` → `chrome.exe` → `firefox.exe` |
 
-| App | How it opens |
-|---|---|
-| Jellyfin | `xdg-open http://localhost:8096` |
-| Plex | `xdg-open https://app.plex.tv` |
-| Kodi | `kodi` binary, or Flatpak fallback |
-| Netflix | `xdg-open https://www.netflix.com` |
-| YouTube | `xdg-open https://www.youtube.com` |
-| Spotify | `spotify` binary, or Flatpak fallback |
-| Browser | `firefox` → `chromium-browser` → `xdg-open` |
-
-To customise, edit `APP_COMMANDS` in `/opt/htpc-remote/server/input/base.py`.
+To customise, edit `APP_COMMANDS` (Linux) or `APP_COMMANDS_WIN` (Windows) in `server/input/base.py`.
 
 ---
 
 ## Service management
 
-The service runs as your user, not root:
+### Linux (systemd)
 
 ```bash
 # Status
@@ -228,8 +257,6 @@ systemctl --user disable htpc-remote
 
 **Changing the idle timeout**
 
-The popup reappears after 2 hours of no connected devices by default. Override it with a drop-in:
-
 ```bash
 systemctl --user edit htpc-remote
 ```
@@ -241,71 +268,102 @@ Add:
 Environment=HTPC_REMOTE_IDLE_TIMEOUT=3600
 ```
 
-Common values: `3600` = 1 hour · `7200` = 2 hours (default) · `0` = revert to old behaviour (popup on every disconnect)
+Common values: `3600` = 1 hour · `7200` = 2 hours (default) · `0` = popup on every disconnect
+
+### Windows (Task Scheduler)
+
+```powershell
+# Stop
+Stop-ScheduledTask   -TaskName 'htpc-remote'
+
+# Start
+Start-ScheduledTask  -TaskName 'htpc-remote'
+
+# Live logs
+Get-Content "$env:LOCALAPPDATA\htpc-remote\htpc-remote.log" -Wait
+
+# Remove
+Unregister-ScheduledTask -TaskName 'htpc-remote' -Confirm:$false
+```
+
+To change the idle timeout on Windows, edit `HTPC_REMOTE_IDLE_TIMEOUT` in a `.env` file in the install directory, or set it as a user environment variable before starting the task.
 
 ---
 
-## X11 vs Wayland
+## X11 vs Wayland vs Windows
 
-Glide detects `$XDG_SESSION_TYPE` at startup and loads the right backend automatically.
+| | X11 | Wayland | Windows |
+|---|---|---|---|
+| Mouse / click | pynput | evdev / uinput | pynput (Win32 VK) |
+| Media keys | XF86 keysyms | Linux keycodes | `Key.media_*` VK codes |
+| Text input | pynput type | wtype → ydotool → wl-copy | pynput type |
+| Seek keys | XF86AudioRewind/Forward | `KEY_REWIND` / `KEY_FASTFORWARD` | Left / Right arrow |
+| Sleep | XF86Sleep keysym | `KEY_SLEEP` | `rundll32 SetSuspendState` |
+| Extra setup | None | `/dev/uinput` group | None |
+| QR overlay | GTK3 | GTK3 | tkinter (stdlib) |
 
-| | X11 | Wayland |
-|---|---|---|
-| Mouse / click | pynput | evdev / uinput |
-| Media keys | XF86 keysyms via pynput | Linux keycodes via evdev |
-| Text input | pynput type | wtype → ydotool → wl-copy |
-| Extra setup | None | `/dev/uinput` group (done by installer) |
-
-If you switch display servers, just restart the service — no reinstall needed.
+On Linux, Glide detects `$XDG_SESSION_TYPE` at startup and loads the right backend automatically. If you switch display servers, restart the service — no reinstall needed.
 
 ---
 
 ## Troubleshooting
 
-**Popup doesn't appear on login**
+**Popup doesn't appear on login (Linux)**
 
 ```bash
-# Check the service
 systemctl --user status htpc-remote
 journalctl --user -u htpc-remote -b --no-pager
 ```
 
-Most common cause: `DISPLAY` or `WAYLAND_DISPLAY` not set in the service environment. The installer sets these via `systemctl --user set-environment`, but a reboot usually fixes it.
+Most common cause: `DISPLAY` or `WAYLAND_DISPLAY` not set in the service environment. A reboot usually fixes it.
+
+**Popup doesn't appear (Windows)**
+
+```powershell
+# Check the task is running
+Get-ScheduledTask -TaskName 'htpc-remote' | Select-Object State
+# Read the log
+Get-Content "$env:LOCALAPPDATA\htpc-remote\htpc-remote.log" -Tail 50
+```
 
 **Phone can't reach the server**
 
-- Make sure phone and HTPC are on the same network
-- Check the firewall: `sudo ufw allow 7000/tcp`
-- Confirm the service is listening: `ss -tlnp | grep 7000`
+- Make sure phone and HTPC are on the same Wi-Fi network
+- Linux: `sudo ufw allow 8765/tcp` then `ss -tlnp | grep 8765`
+- Windows: `netsh advfirewall firewall add rule name="Glide" dir=in action=allow protocol=TCP localport=8765`
 
 **Wayland: mouse moves but keyboard/media keys don't work**
 
 ```bash
-# Check uinput group
 groups $USER  # should include 'input'
 
-# If not, add and re-login
+# If not:
 sudo usermod -aG input $USER
+# Then log out and back in, and restart the service
 ```
 
 **Text input (Wayland) doesn't work**
 
-Install `wtype`: `sudo apt install wtype`
+```bash
+sudo apt install wtype      # Debian / Ubuntu
+sudo dnf install wtype      # Fedora
+sudo pacman -S wtype        # Arch
+```
 
 ---
 
 ## How it works
 
 ```
-Phone browser  ──WebSocket──▶  FastAPI server (port 7000)
+Phone browser  ──WebSocket──▶  FastAPI server (port 8765)
                                        │
-                      ┌────────────────┴─────────────────┐
-                      ▼                                   ▼
-               X11 (pynput)                     Wayland (evdev/uinput)
-               XF86 keysyms                     Linux keycodes
+                ┌──────────────────────┼──────────────────────┐
+                ▼                      ▼                       ▼
+         X11 (pynput)        Wayland (evdev/uinput)   Windows (pynput)
+         XF86 keysyms        Linux keycodes            Win32 VK codes
 ```
 
-The server translates incoming WebSocket messages into real input events using the active display server's native API. The GTK overlay is driven by the same server via a shared state object — it hides the moment a WebSocket client connects, and shows on startup or after 2 hours of inactivity. Brief disconnects (phone lock, tab switch) are absorbed by a `GLib.timeout_add_seconds` timer that resets on every reconnect.
+The server translates incoming WebSocket messages into real input events using the platform's native API. The overlay (GTK3 on Linux, tkinter on Windows) is driven by the same server via a shared state object — it hides the moment a WebSocket client connects, and shows on startup or after 2 hours of inactivity. Brief disconnects are absorbed by a timer (`GLib.timeout_add_seconds` on Linux, `root.after` on Windows) that resets on every reconnect.
 
 ---
 
@@ -314,27 +372,34 @@ The server translates incoming WebSocket messages into real input events using t
 ```
 htpc-remote/
 ├── server/
-│   ├── app.py          FastAPI + WebSocket handler
-│   ├── overlay.py      GTK3 QR popup
-│   ├── main.py         Entry point (uvicorn thread + GTK main loop)
+│   ├── app.py            FastAPI + WebSocket handler
+│   ├── overlay.py        GTK3 (Linux) + tkinter (Windows) QR popup
+│   ├── main.py           Entry point (uvicorn thread + overlay main loop)
 │   └── input/
-│       ├── base.py     InputBackend ABC + APP_COMMANDS
-│       ├── x11.py      pynput backend
-│       └── wayland.py  evdev/uinput backend
+│       ├── base.py       InputBackend ABC + APP_COMMANDS (Linux + Windows)
+│       ├── x11.py        pynput backend (Linux X11)
+│       ├── wayland.py    evdev/uinput backend (Linux Wayland)
+│       └── windows.py    pynput + Win32 VK backend
 ├── web/
-│   ├── index.html      Mobile UI entry point
+│   ├── index.html        Mobile UI entry point + PWA registration
+│   ├── manifest.json     PWA manifest (name, icons, display mode)
+│   ├── sw.js             Service worker — caches all static assets
 │   └── static/
-│       ├── glide-tokens.css     Design tokens (OLED dark, Pop!_OS teal)
-│       ├── glide-ui.jsx         Icon set + shared primitives
-│       ├── glide-connect.jsx    WS connection flow
-│       ├── glide-controller.jsx Full controller UI
-│       └── ws.js                WebSocket manager + rAF batching
+│       ├── glide-tokens.css      Design tokens (OLED dark, Pop!_OS teal)
+│       ├── glide-ui.jsx          Icon set + shared primitives
+│       ├── glide-connect.jsx     WS connection flow
+│       ├── glide-controller.jsx  Full controller UI
+│       ├── ws.js                 WebSocket manager + rAF batching
+│       └── icons/                App icons (SVG + PNG for manifest + iOS)
 ├── packaging/
-│   └── DEBIAN/
-│       ├── control     Package metadata
-│       ├── postinst    Install script (venv, udev, systemd)
-│       └── prerm       Clean uninstall
-└── build-deb.sh        One-command .deb builder (uses Docker)
+│   ├── DEBIAN/           .deb control files (postinst, prerm, postrm)
+│   └── SPEC/             RPM spec file
+├── .github/workflows/
+│   └── release.yml       CI: builds .deb, .rpm, Windows .zip, Linux .tar.gz
+├── build-deb.sh          One-command .deb builder (Docker)
+├── build-rpm.sh          One-command .rpm builder (Docker)
+├── install.sh            Universal Linux installer (apt/dnf/pacman/zypper)
+└── install-windows.ps1   Windows installer (venv + Task Scheduler)
 ```
 
 ---

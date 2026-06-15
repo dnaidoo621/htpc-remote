@@ -5,3 +5,9 @@ __pycache__/
 .env
 *.log
 .DS_Store
+.deb-build/
+.rpm-build/
+*.deb
+*.rpm
+*.zip
+*.tar.gz

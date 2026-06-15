@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Dark background -->
+  <rect width="512" height="512" fill="#07090c"/>
+  <!-- GlideMark: teal rounded square (28% corner radius, matching the React component) -->
+  <rect x="116" y="116" width="280" height="280" rx="78" fill="#00C896"/>
+  <!-- Cursor arrow — same path as GIcon name="cursor" in glide-ui.jsx, scaled ×9 -->
+  <g transform="translate(148,162) scale(9)">
+    <path d="M5 3l14 7-6 1.5L9.5 18 5 3z" fill="#04211f"/>
+  </g>
+</svg>

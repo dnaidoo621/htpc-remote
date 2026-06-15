@@ -1,4 +1,5 @@
 import os
+import sys
 import logging
 
 from .base import InputBackend
@@ -7,12 +8,21 @@ logger = logging.getLogger(__name__)
 
 
 def get_backend() -> InputBackend:
+    if sys.platform == "win32":
+        return _init_windows()
+
     session = os.environ.get("XDG_SESSION_TYPE", "x11").lower()
     logger.info("Detected session type: %s", session)
 
     if session == "wayland":
         return _init_wayland()
     return _init_x11()
+
+
+def _init_windows() -> InputBackend:
+    from .windows import WindowsBackend
+    logger.info("Using Windows input backend (pynput)")
+    return WindowsBackend()
 
 
 def _init_x11() -> InputBackend:

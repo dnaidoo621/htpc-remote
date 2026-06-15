@@ -33,6 +33,7 @@ rsync -a \
     --exclude='packaging' \
     --exclude='build-deb.sh' \
     --exclude='*.deb' \
+    --exclude='.github' \
     --exclude='venv' \
     --exclude='__pycache__' \
     --exclude='*.pyc' \

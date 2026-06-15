@@ -28,7 +28,12 @@ IDLE_TIMEOUT_SECONDS: int = int(os.environ.get("HTPC_REMOTE_IDLE_TIMEOUT", 7200)
 
 
 def run_overlay(state: AppState) -> None:
-    """Blocking call — runs the GTK main loop."""
+    """Blocking call — runs the platform overlay main loop."""
+    import sys
+    if sys.platform == "win32":
+        _run_win32_overlay(state)
+        return
+
     try:
         import gi
         gi.require_version("Gtk", "3.0")
@@ -204,6 +209,110 @@ class _QROverlay:
                     IDLE_TIMEOUT_SECONDS,
                 )
         return False
+
+
+def _run_win32_overlay(state: AppState) -> None:
+    """
+    Tkinter QR overlay for Windows.  tkinter is stdlib so no extra packages
+    needed beyond Pillow (already in requirements.txt for qrcode).
+    Applies the same idle-timeout show/hide policy as the GTK overlay.
+    """
+    try:
+        import tkinter as tk
+        from PIL import Image, ImageTk
+        import io
+    except Exception as e:
+        logger.warning("tkinter/PIL not available (%s) — falling back to terminal.", e)
+        _run_terminal_fallback(state)
+        return
+
+    from .network import generate_qr_bytes
+
+    root = tk.Tk()
+    root.title("Glide — HTPC Remote")
+    root.configure(bg="#111111")
+    root.resizable(False, False)
+    root.attributes("-topmost", True)
+
+    # Size and center on primary monitor
+    w, h = 420, 490
+    sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+    root.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
+
+    # Closing the window hides it rather than killing the server process
+    root.protocol("WM_DELETE_WINDOW", root.withdraw)
+
+    tk.Label(root, text="Scan to connect", bg="#111111", fg="#ffffff",
+             font=("Segoe UI", 16, "bold")).pack(pady=(24, 8))
+
+    qr_label = tk.Label(root, bg="#111111")
+    qr_label.pack()
+
+    url_label = tk.Label(root, text="", bg="#111111", fg="#888888",
+                         font=("Segoe UI", 11))
+    url_label.pack(pady=(6, 0))
+
+    status_label = tk.Label(root, text="Waiting for connection…",
+                            bg="#111111", fg="#44CC88", font=("Segoe UI", 10))
+    status_label.pack(pady=(10, 0))
+
+    # Mutable state — all mutations happen on the tkinter main thread via after()
+    ctx: dict = {"ever_connected": False, "timer_id": None, "photo": None}
+
+    def load_qr() -> None:
+        url = state.server_url
+        if not url:
+            return
+        png = generate_qr_bytes(url)
+        img = Image.open(io.BytesIO(png)).resize((280, 280), Image.NEAREST)
+        ctx["photo"] = ImageTk.PhotoImage(img)  # keep reference alive
+        qr_label.configure(image=ctx["photo"])
+        url_label.configure(text=url)
+
+    def show_popup() -> None:
+        load_qr()
+        status_label.configure(text="Waiting for connection…")
+        root.deiconify()
+        root.lift()
+        root.attributes("-topmost", True)
+
+    def hide_popup() -> None:
+        root.withdraw()
+
+    def cancel_timer() -> None:
+        if ctx["timer_id"] is not None:
+            root.after_cancel(ctx["timer_id"])
+            ctx["timer_id"] = None
+
+    def on_idle_timeout() -> None:
+        ctx["timer_id"] = None
+        if state.client_count == 0:
+            logger.info("No device connected for %d s — showing QR popup.", IDLE_TIMEOUT_SECONDS)
+            show_popup()
+
+    def handle_state(client_count: int) -> None:
+        """Runs on the tkinter main thread (scheduled via root.after)."""
+        if client_count > 0:
+            ctx["ever_connected"] = True
+            cancel_timer()
+            hide_popup()
+        else:
+            if not ctx["ever_connected"]:
+                show_popup()
+            else:
+                cancel_timer()
+                # after() takes milliseconds
+                ctx["timer_id"] = root.after(IDLE_TIMEOUT_SECONDS * 1000, on_idle_timeout)
+                logger.debug("Idle timer started — popup in %d s if nobody reconnects.",
+                             IDLE_TIMEOUT_SECONDS)
+
+    # root.after() is thread-safe; schedule all state handling onto the main thread
+    state.subscribe(lambda s: root.after(0, handle_state, s.client_count))
+
+    # Load QR after the event loop starts so the URL is definitely available
+    root.after(200, load_qr)
+
+    root.mainloop()
 
 
 def _run_terminal_fallback(state: AppState) -> None:
