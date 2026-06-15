@@ -164,7 +164,11 @@ function GlideController({ device = 'Living-Room PC' }) {
   return (
     <div className="g-app" style={{
       position: 'absolute', inset: 0, background: 'var(--g-bg)', overflow: 'hidden',
-      display: 'flex', flexDirection: 'column', padding: '54px 14px 26px',
+      display: 'flex', flexDirection: 'column',
+      paddingTop: 'calc(env(safe-area-inset-top, 0px) + 10px)',
+      paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)',
+      paddingLeft: 'calc(env(safe-area-inset-left, 0px) + 14px)',
+      paddingRight: 'calc(env(safe-area-inset-right, 0px) + 14px)',
     }}>
       {/* ambient glow */}
       <div style={{ position: 'absolute', top: -140, left: '50%', transform: 'translateX(-50%)', width: 360, height: 300,
