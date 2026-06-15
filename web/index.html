@@ -5,8 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="theme-color" content="#07090c">
+  <meta name="apple-mobile-web-app-title" content="Glide">
+  <meta name="theme-color" content="#00C896">
   <title>Glide Remote</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+  <link rel="icon" type="image/svg+xml" href="/static/icons/icon.svg">
   <link rel="stylesheet" href="/static/glide-tokens.css">
   <style>
     html, body, #app-root {
@@ -38,6 +42,15 @@
   <!-- Controller + connect flow -->
   <script type="text/babel" src="/static/glide-controller.jsx"></script>
   <script type="text/babel" src="/static/glide-connect.jsx"></script>
+
+  <!-- PWA service worker -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').catch(() => {});
+      });
+    }
+  </script>
 
   <!-- Bootstrap -->
   <script type="text/babel">
