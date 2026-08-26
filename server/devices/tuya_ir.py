@@ -20,6 +20,7 @@ import logging
 import os
 import tempfile
 import threading
+import time
 
 from .base import (
     CAP_CHANNEL, CAP_INPUT, CAP_LEARN, CAP_MEDIA, CAP_NAV, CAP_POWER,
@@ -246,16 +247,10 @@ class TuyaIRDevice(DeviceBackend):
             return False
         try:
             try:
-                self._local.study_start()
-                code = self._local.receive_button(timeout=timeout)
+                code = self._capture(timeout)
             except Exception as e:
                 logger.warning("%s: learn failed for %r: %s", self.name, action, e)
                 return False
-            finally:
-                try:
-                    self._local.study_end()
-                except Exception:
-                    pass
 
             if not valid_code(code):
                 # Distinguish "nobody pressed anything" from "the hub answered
@@ -281,6 +276,63 @@ class TuyaIRDevice(DeviceBackend):
             return True
         finally:
             self._lock.release()
+
+    # Data points the hub reports a freshly-learned code on.
+    _DP_LEARNED_REPORT = "2"    # newer hardware (control_type 2)
+    _DP_LEARNED_ID = "202"      # older hardware (control_type 1)
+
+    def _capture(self, timeout: int) -> str | None:
+        """
+        Listen for one learned code.
+
+        Not tinytuya's receive_button(): that breaks out of its listen loop on
+        the first frame that isn't a dps message, and this hardware emits an
+        error frame unprompted. Capture aborted instantly and returned the
+        error dict, which then got stored as if it were a code. Ignore frames
+        we don't recognise and keep listening until the clock runs out.
+        """
+        dev = self._local
+        dev.study_end()      # clear any half-finished session
+
+        # The hub buffers a learned code and replays it to the next listener.
+        # Without draining, a press from a previous session gets attributed to
+        # whichever button is being taught now — one captured 'up' was stored
+        # as 'mute' this way. Discard anything already queued before listening.
+        dev.set_socketTimeout(2)
+        for _ in range(3):
+            try:
+                stale = dev._send_receive(None)
+            except Exception:
+                break
+            if not isinstance(stale, dict) or "dps" not in stale:
+                continue
+            if any(stale["dps"].get(dp) for dp in
+                   (self._DP_LEARNED_REPORT, self._DP_LEARNED_ID)):
+                logger.debug("%s: discarded a buffered code before capture", self.name)
+
+        dev.study_start()
+        deadline = time.monotonic() + timeout
+        try:
+            while time.monotonic() < deadline:
+                dev.set_socketTimeout(2)
+                try:
+                    frame = dev._send_receive(None)
+                except Exception as e:
+                    logger.debug("%s: listen frame raised %s", self.name, e)
+                    continue
+                if not isinstance(frame, dict) or "dps" not in frame:
+                    continue          # timeout or an error frame — keep waiting
+                dps = frame["dps"]
+                for dp in (self._DP_LEARNED_REPORT, self._DP_LEARNED_ID):
+                    if dps.get(dp):
+                        return dps[dp]
+        finally:
+            try:
+                dev.study_end()
+            except Exception:
+                pass
+            dev.set_socketTimeout(5)
+        return None
 
     def forget(self, action: str) -> bool:
         with self._lock:
