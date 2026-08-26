@@ -353,9 +353,38 @@ function GlideController({ device = 'Living-Room PC' }) {
    appear only if the device declares the capability AND reports the action,
    so a new backend needs no changes here.                                   */
 function DevicePanel({ dev, flash }) {
+  const [learnMode, setLearnMode] = useState(false);
+  const [capturing, setCapturing] = useState(null);   // { action, timeout }
+
   const can  = (c) => dev.capabilities.includes(c);
   const has  = (a) => dev.actions.includes(a);
+  const isLearned = (a) => (dev.learned || []).includes(a);
+
+  /* learn progress from the server */
+  useEffect(() => {
+    return window.WS.onLearn((m) => {
+      if (m.device !== dev.id) return;
+      if (m.state === 'waiting') {
+        setCapturing({ action: m.action, timeout: m.timeout });
+      } else {
+        setCapturing(null);
+        if (m.state === 'captured')      flash(`Learned ${m.action}`);
+        else if (m.state === 'timeout')  flash('Nothing captured');
+        else if (m.state === 'forgotten')flash(`Forgot ${m.action}`);
+        else if (m.state === 'error')    flash(m.message || 'Learn failed');
+      }
+    });
+  }, [dev.id, flash]);
+
+  /* Leaving learn mode shouldn't strand an in-flight capture prompt. */
+  useEffect(() => { if (!learnMode) setCapturing(null); }, [learnMode]);
+
   const fire = (action, label) => {
+    if (learnMode) {
+      if (isLearned(action)) window.WS.forgetDevice(dev.id, action);
+      else                   window.WS.learnDevice(dev.id, action, 30);
+      return;
+    }
     window.WS.sendDevice(dev.id, action);
     flash(label);
   };
@@ -364,18 +393,30 @@ function DevicePanel({ dev, flash }) {
     <div style={{ display: 'flex', gap: 8, height: h }}>{children}</div>
   );
   const btn = (action, label, icon, opts = {}) => has(action) && (
-    <GBtn key={action} flex={opts.flex || 1} accent={opts.accent} danger={opts.danger}
+    <GBtn key={action} flex={opts.flex || 1}
+      accent={opts.accent && !learnMode} danger={opts.danger}
+      active={learnMode && isLearned(action)}
       onPress={() => fire(action, label)}
-      style={{ gap: 7, ...(opts.style || {}) }}>
+      style={{ gap: 7, position: 'relative', ...(opts.style || {}) }}>
       {icon && <GIcon name={icon} size={opts.iconSize || 19} />}
       {opts.showLabel !== false &&
         <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--g-text-2)' }}>{label}</span>}
+      {isLearned(action) && (
+        <span title="learned locally" style={{ position: 'absolute', top: 5, right: 6,
+          width: 5, height: 5, borderRadius: 999, background: 'var(--g-accent)' }} />
+      )}
     </GBtn>
   );
 
   const dpad = (action, icon) => (
-    <GBtn onPress={() => fire(action, action)} style={{ borderRadius: 15 }}>
+    <GBtn onPress={() => fire(action, action)}
+      active={learnMode && isLearned(action)}
+      style={{ borderRadius: 15, position: 'relative' }}>
       <GIcon name={icon} size={22} />
+      {isLearned(action) && (
+        <span style={{ position: 'absolute', top: 6, right: 7, width: 5, height: 5,
+          borderRadius: 999, background: 'var(--g-accent)' }} />
+      )}
     </GBtn>
   );
   const blank = <div />;
@@ -384,6 +425,55 @@ function DevicePanel({ dev, flash }) {
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex',
       flexDirection: 'column', gap: 12, position: 'relative', zIndex: 1, paddingBottom: 4 }}>
+
+      {/* learn mode — teaches the hub straight from a physical remote, so the
+          device keeps working without any cloud account */}
+      {can('learn') && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px',
+          borderRadius: 14, ...glass,
+          ...(learnMode ? { borderColor: 'var(--g-accent)', background: 'var(--g-accent-dim)' } : {}) }}>
+          <GIcon name="keyboard" size={17}
+            style={{ color: learnMode ? 'var(--g-accent)' : 'var(--g-text-3)' }} />
+          <div style={{ flex: 1, lineHeight: 1.25 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 600,
+              color: learnMode ? 'var(--g-accent)' : 'var(--g-text-2)' }}>
+              {learnMode ? 'Teach mode' : 'Teach from remote'}
+            </div>
+            <div className="g-mono" style={{ fontSize: 10, color: 'var(--g-text-3)' }}>
+              {learnMode ? 'tap a button, then press it on your remote'
+                         : `${(dev.learned || []).length} learned`}
+            </div>
+          </div>
+          <button className="g-press" onClick={() => setLearnMode((v) => !v)}
+            style={{ ...seg(learnMode), flex: 'none', padding: '7px 14px', borderRadius: 10,
+              background: learnMode ? 'var(--g-accent)' : 'var(--g-glass-hi)',
+              color: learnMode ? '#04211f' : 'var(--g-text-2)' }}>
+            {learnMode ? 'Done' : 'Teach'}
+          </button>
+        </div>
+      )}
+
+      {/* capture prompt */}
+      {capturing && (
+        <div onClick={() => setCapturing(null)}
+          style={{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(0,0,0,0.72)',
+            backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center',
+            justifyContent: 'center', padding: 28 }}>
+          <div style={{ ...glass, borderRadius: 22, padding: '26px 22px', maxWidth: 300,
+            textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div className="g-live-dot" style={{ width: 12, height: 12, borderRadius: 999,
+              background: 'var(--g-accent)', margin: '0 auto' }} />
+            <div style={{ fontSize: 15, fontWeight: 600 }}>Press “{capturing.action}”</div>
+            <div style={{ fontSize: 12.5, color: 'var(--g-text-2)', lineHeight: 1.45 }}>
+              Point your remote at the IR hub and press the button you want to store.
+            </div>
+            <div className="g-mono" style={{ fontSize: 10.5, color: 'var(--g-text-3)' }}>
+              waiting up to {capturing.timeout}s · tap to cancel
+            </div>
+          </div>
+        </div>
+      )}
+
 
       {/* power — 'power_on' is discrete, so it's the safe primary */}
       {can('power') && row(<>

@@ -15,11 +15,15 @@ Library codesets (the ones you get by picking "LG" in the app) live on Tuya's
 servers and are not downloadable, which is why the cloud transport exists at
 all.  Learned codes land in the local file and silently take precedence.
 """
+import json
 import logging
+import os
+import tempfile
+import threading
 
 from .base import (
-    CAP_CHANNEL, CAP_INPUT, CAP_MEDIA, CAP_NAV, CAP_POWER, CAP_VOLUME,
-    DeviceBackend,
+    CAP_CHANNEL, CAP_INPUT, CAP_LEARN, CAP_MEDIA, CAP_NAV, CAP_POWER,
+    CAP_VOLUME, DeviceBackend,
 )
 
 logger = logging.getLogger(__name__)
@@ -82,6 +86,7 @@ class TuyaIRDevice(DeviceBackend):
         version: float = 3.5,
         cloud: dict | None = None,
         codes: dict[str, str] | None = None,
+        codes_path: str | None = None,
     ) -> None:
         self.id = id
         self.name = name
@@ -93,9 +98,15 @@ class TuyaIRDevice(DeviceBackend):
         self._remote_id = remote_id
         self._category_id = category_id
         self._codes = codes or {}
+        self._codes_path = codes_path
+        self._lock = threading.Lock()  # one learn/send on the hub at a time
 
         self._cloud = self._init_cloud(cloud)
         self._local = self._init_local(hub_id, host, local_key, version)
+
+        # Learning needs a LAN connection; it never goes through the cloud.
+        if self._local:
+            self.capabilities.add(CAP_LEARN)
 
         if not self._cloud and not self._local:
             logger.warning("%s: no working transport — commands will no-op", name)
@@ -118,9 +129,9 @@ class TuyaIRDevice(DeviceBackend):
             return None
 
     def _init_local(self, hub_id, host, local_key, version):
-        # Only useful once codes have been learned; skip the connection
-        # entirely if there are none to replay.
-        if not (host and local_key and self._codes):
+        # Needed to replay learned codes *and* to learn new ones, so connect
+        # whenever we have credentials — even with no codes stored yet.
+        if not (host and local_key):
             return None
         try:
             from tinytuya.Contrib import IRRemoteControlDevice
@@ -139,17 +150,81 @@ class TuyaIRDevice(DeviceBackend):
     def actions(self) -> list[str]:
         return sorted(set(TV_KEYS) | set(self._codes))
 
-    def send(self, action: str, value: str | int | None = None) -> bool:
-        if self._local and action in self._codes:
-            if self._send_local(self._codes[action]):
-                return True
-            logger.debug("%s: local send failed for %r, trying cloud", self.name, action)
+    def learned(self) -> list[str]:
+        return sorted(self._codes)
 
-        entry = TV_KEYS.get(action)
-        if not entry:
-            logger.warning("%s: unknown action %r", self.name, action)
+    def send(self, action: str, value: str | int | None = None) -> bool:
+        with self._lock:
+            code = self._codes.get(action)
+            if self._local and code:
+                if self._send_local(code):
+                    return True
+                logger.debug("%s: local send failed for %r, trying cloud",
+                             self.name, action)
+
+            entry = TV_KEYS.get(action)
+            if not entry:
+                logger.warning("%s: unknown action %r", self.name, action)
+                return False
+            return self._send_cloud(*entry)
+
+    # ── learning ───────────────────────────────────────────────────────── #
+
+    def learn(self, action: str, timeout: int = 30) -> bool:
+        """
+        Capture one press from a physical remote and store it against
+        `action`.  Purely local — the cloud is never involved, so a device
+        learned this way keeps working if the Tuya subscription lapses.
+        """
+        if not self._local:
+            logger.warning("%s: cannot learn without a LAN connection", self.name)
             return False
-        return self._send_cloud(*entry)
+
+        with self._lock:
+            try:
+                self._local.study_start()
+                code = self._local.receive_button(timeout=timeout)
+            except Exception as e:
+                logger.warning("%s: learn failed for %r: %s", self.name, action, e)
+                return False
+            finally:
+                try:
+                    self._local.study_end()
+                except Exception:
+                    pass
+
+            if not code:
+                logger.info("%s: nothing captured for %r", self.name, action)
+                return False
+
+            self._codes[action] = code
+            self._persist()
+            logger.info("%s: learned %r (%d chars)", self.name, action, len(code))
+            return True
+
+    def forget(self, action: str) -> bool:
+        with self._lock:
+            if self._codes.pop(action, None) is None:
+                return False
+            self._persist()
+            logger.info("%s: forgot learned code for %r", self.name, action)
+            return True
+
+    def _persist(self) -> None:
+        """Write codes atomically so a crash mid-write can't corrupt them."""
+        if not self._codes_path:
+            return
+        try:
+            d = os.path.dirname(self._codes_path) or "."
+            os.makedirs(d, exist_ok=True)
+            fd, tmp = tempfile.mkstemp(dir=d, suffix=".tmp")
+            with os.fdopen(fd, "w") as f:
+                json.dump(self._codes, f, indent=2)
+            os.replace(tmp, self._codes_path)
+            os.chmod(self._codes_path, 0o600)
+        except OSError as e:
+            logger.error("%s: could not save codes to %s: %s",
+                         self.name, self._codes_path, e)
 
     def _send_local(self, b64: str) -> bool:
         try:

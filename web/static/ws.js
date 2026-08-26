@@ -11,7 +11,7 @@ window.WS = (() => {
   let ws        = null;
   let connected = false;
   let devices   = [];   // extra controllable devices (TV, receiver…)
-  const listeners = { connect: [], disconnect: [], devices: [] };
+  const listeners = { connect: [], disconnect: [], devices: [], learn: [] };
 
   /* ── subscription helper ── */
   function on(event, fn) {
@@ -71,6 +71,15 @@ window.WS = (() => {
       if (msg.type === 'connected' && Array.isArray(msg.devices)) {
         devices = msg.devices;
         emit('devices', devices);
+      } else if (msg.type === 'learn') {
+        // Keep the cached device list's 'learned' array in step so the UI
+        // can mark buttons without a round trip.
+        if (Array.isArray(msg.learned)) {
+          devices = devices.map((d) =>
+            d.id === msg.device ? { ...d, learned: msg.learned } : d);
+          emit('devices', devices);
+        }
+        emit('learn', msg);
       }
     };
   }
@@ -80,6 +89,7 @@ window.WS = (() => {
     onConnect:    (fn) => on('connect', fn),
     onDisconnect: (fn) => on('disconnect', fn),
     onDevices:    (fn) => on('devices', fn),
+    onLearn:      (fn) => on('learn', fn),
     isConnected:  ()  => connected,
     getDevices:   ()  => devices,
 
@@ -91,6 +101,13 @@ window.WS = (() => {
     /* Fire an action at a non-HTPC device (TV, receiver…). */
     sendDevice(device, action, value) {
       this.send({ type: 'device', device, action, value });
+    },
+    /* Capture this action from a physical remote; watch onLearn for progress. */
+    learnDevice(device, action, timeout) {
+      this.send({ type: 'device_learn', device, action, timeout });
+    },
+    forgetDevice(device, action) {
+      this.send({ type: 'device_forget', device, action });
     },
     queueMove,
     queueScroll,

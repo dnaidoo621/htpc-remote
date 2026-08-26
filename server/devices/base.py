@@ -17,6 +17,7 @@ CAP_CHANNEL = "channel"       # channel up/down + digits
 CAP_POINTER = "pointer"       # cursor movement (trackpad stays live)
 CAP_TEXT   = "text"           # send arbitrary text
 CAP_APPS   = "apps"           # launch apps by name
+CAP_LEARN  = "learn"          # can capture codes from a physical remote
 
 
 class DeviceBackend(ABC):
@@ -39,12 +40,29 @@ class DeviceBackend(ABC):
         """Every action this device accepts, for the UI to enable/disable."""
         return []
 
+    def learned(self) -> list[str]:
+        """Actions with a locally-stored code, so the UI can mark them."""
+        return []
+
+    def learn(self, action: str, timeout: int = 30) -> bool:
+        """
+        Put the device into learning mode and capture one command from a
+        physical remote, storing it against `action`.  Blocking for up to
+        `timeout` seconds — always call from a threadpool.
+        """
+        return False
+
+    def forget(self, action: str) -> bool:
+        """Drop a learned code, falling back to whatever else can serve it."""
+        return False
+
     def describe(self) -> dict:
         return {
             "id": self.id,
             "name": self.name,
             "capabilities": sorted(self.capabilities),
             "actions": self.actions(),
+            "learned": self.learned(),
         }
 
     def cleanup(self) -> None:

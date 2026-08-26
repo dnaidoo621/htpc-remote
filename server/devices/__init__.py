@@ -66,6 +66,7 @@ def _build(entry: dict, config_dir: str) -> DeviceBackend | None:
     try:
         if kind == "tuya_ir":
             from .tuya_ir import TuyaIRDevice
+            codes_path = _codes_path(entry.get("codes_file"), config_dir)
             return TuyaIRDevice(
                 id=entry["id"],
                 name=entry.get("name", entry["id"]),
@@ -76,7 +77,8 @@ def _build(entry: dict, config_dir: str) -> DeviceBackend | None:
                 host=entry.get("host"),
                 version=entry.get("version", 3.5),
                 cloud=entry.get("cloud"),
-                codes=_load_codes(entry.get("codes_file"), config_dir),
+                codes=_load_codes(codes_path),
+                codes_path=codes_path,
             )
     except KeyError as e:
         logger.error("Device %r missing required field %s", entry.get("id"), e)
@@ -89,11 +91,17 @@ def _build(entry: dict, config_dir: str) -> DeviceBackend | None:
     return None
 
 
-def _load_codes(filename: str | None, config_dir: str) -> dict[str, str]:
-    """Learned IR codes, if any have been captured yet."""
+def _codes_path(filename: str | None, config_dir: str) -> str | None:
+    """Where learned codes live — relative names sit beside the config."""
     if not filename:
+        return None
+    return filename if os.path.isabs(filename) else os.path.join(config_dir, filename)
+
+
+def _load_codes(path: str | None) -> dict[str, str]:
+    """Learned IR codes, if any have been captured yet."""
+    if not path:
         return {}
-    path = filename if os.path.isabs(filename) else os.path.join(config_dir, filename)
     try:
         with open(path) as f:
             codes = json.load(f)
