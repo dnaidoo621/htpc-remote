@@ -14,6 +14,20 @@ Two transports, tried in order:
 Library codesets (the ones you get by picking "LG" in the app) live on Tuya's
 servers and are not downloadable, which is why the cloud transport exists at
 all.  Learned codes land in the local file and silently take precedence.
+
+local_control defaults to OFF, because a good number of these hubs are
+cloud-only for infrared and there is no way to detect it from the protocol.
+A Vizia Smart IR (category wnykq, protocol 3.5) was measured doing exactly
+this: the session key negotiates, DP writes are accepted and acknowledged
+with retcode=0 and an empty payload, and no infrared is ever emitted. Study
+mode silently fails the same way, so capture never returns anything either,
+while identical commands through the cloud drive the TV correctly.
+
+Since a failed local write is indistinguishable from a successful one, the
+only honest default is to trust the cloud and let anyone whose hub really
+does support local control opt in with "local_control": true.  Teach is only
+offered when local control is on, so the UI never shows a button that cannot
+work.
 """
 import json
 import logging
@@ -140,6 +154,7 @@ class TuyaIRDevice(DeviceBackend):
         cloud: dict | None = None,
         codes: dict[str, str] | None = None,
         codes_path: str | None = None,
+        local_control: bool = False,
     ) -> None:
         self.id = id
         self.name = name
@@ -155,7 +170,8 @@ class TuyaIRDevice(DeviceBackend):
         self._lock = threading.Lock()  # one learn/send on the hub at a time
 
         self._cloud = self._init_cloud(cloud)
-        self._local = self._init_local(hub_id, host, local_key, version)
+        self._local = (self._init_local(hub_id, host, local_key, version)
+                       if local_control else None)
 
         # Learning needs a LAN connection; it never goes through the cloud.
         if self._local:
@@ -183,8 +199,9 @@ class TuyaIRDevice(DeviceBackend):
             return None
 
     def _init_local(self, hub_id, host, local_key, version):
+        # Off by default — see the local_control note in the class docstring.
         # Needed to replay learned codes *and* to learn new ones, so connect
-        # whenever we have credentials — even with no codes stored yet.
+        # whenever we have credentials, even with no codes stored yet.
         if not (host and local_key):
             return None
         try:
