@@ -30,9 +30,15 @@ rsync -a \
     --exclude '__pycache__' \
     --exclude '*.pyc' \
     --exclude '.gitignore' \
+    --exclude '.DS_Store' \
+    --exclude '._*' \
     "$SCRIPT_DIR/" "$SRCDIR/"
 
-tar -C "$BUILD_DIR/SOURCES" \
+# COPYFILE_DISABLE stops macOS tar writing an AppleDouble ._* sidecar for every
+# file that has extended attributes. Without it the .rpm shipped 52 of them,
+# including ._.DS_Store and ._build-deb.sh, straight into /opt/htpc-remote.
+COPYFILE_DISABLE=1 tar -C "$BUILD_DIR/SOURCES" \
+    --exclude '.DS_Store' --exclude '._*' \
     -czf "$BUILD_DIR/SOURCES/${SRCNAME}.tar.gz" \
     "$SRCNAME"
 

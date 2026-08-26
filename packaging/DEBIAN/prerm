@@ -4,7 +4,14 @@ set -e
 echo "=== htpc-remote: pre-remove ==="
 
 # Stop and disable for all users before removal
-systemctl --user --global disable htpc-remote.service 2>/dev/null || true
+systemctl --global disable htpc-remote.service 2>/dev/null || true
+
+# A hand-made system unit isn't ours to remove, but it points at /opt which is
+# about to go away — stop it so it doesn't respawn against missing files.
+if systemctl is-active htpc-remote.service >/dev/null 2>&1; then
+    echo "  Stopping system-level htpc-remote.service (left enabled — not ours to remove)."
+    systemctl stop htpc-remote.service 2>/dev/null || true
+fi
 
 # Stop for the currently active session if possible
 REAL_USER=$(who 2>/dev/null | awk '/:0/{print $1; exit}')

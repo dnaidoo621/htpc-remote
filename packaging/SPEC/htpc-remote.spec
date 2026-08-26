@@ -39,6 +39,11 @@ rm -f   %{buildroot}/opt/%{name}/build-rpm.sh
 rm -f   %{buildroot}/opt/%{name}/*.deb
 rm -f   %{buildroot}/opt/%{name}/*.rpm
 
+# Belt and braces against macOS build hosts: AppleDouble sidecars and Finder
+# metadata must never reach a Linux package.
+find %{buildroot}/opt/%{name} -name '._*' -delete
+find %{buildroot}/opt/%{name} -name '.DS_Store' -delete
+
 # Fix permissions: directories 755, files 644, entry-point 755
 find %{buildroot}/opt/%{name} -type d -exec chmod 755 {} \;
 find %{buildroot}/opt/%{name} -type f -exec chmod 644 {} \;
@@ -47,27 +52,11 @@ chmod 755 %{buildroot}/opt/%{name}/install.sh
 chmod 755 %{buildroot}/opt/%{name}/install-windows.ps1
 
 # ── Systemd user service → /usr/lib/systemd/user ──────────────────────────
+# Copied from systemd/htpc-remote.service, the single source of truth shared
+# with the .deb. Do not inline a copy here — the two drifted apart once already.
 install -dm 755 %{buildroot}/usr/lib/systemd/user
-cat > %{buildroot}/usr/lib/systemd/user/%{name}.service << 'SERVICE'
-[Unit]
-Description=HTPC Remote Control Server (Glide)
-Documentation=https://github.com/dnaidoo621/htpc-remote
-After=network-online.target graphical-session.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-WorkingDirectory=/opt/htpc-remote
-ExecStart=/opt/htpc-remote/venv/bin/python /opt/htpc-remote/run.py
-Restart=on-failure
-RestartSec=5
-StandardOutput=journal
-StandardError=journal
-Environment="PYTHONUNBUFFERED=1"
-
-[Install]
-WantedBy=default.target
-SERVICE
+install -m 644 systemd/%{name}.service \
+    %{buildroot}/usr/lib/systemd/user/%{name}.service
 
 # ── udev rule → /etc/udev/rules.d ─────────────────────────────────────────
 install -dm 755 %{buildroot}/etc/udev/rules.d
@@ -114,17 +103,35 @@ udevadm trigger            2>/dev/null || true
 
 # 4. Enable + start the systemd user service
 echo "[4/4] Enabling systemd user service..."
-systemctl --user --global enable %{name}.service 2>/dev/null || true
 
-if [ -n "$REAL_USER" ]; then
-    USER_UID=$(id -u "$REAL_USER" 2>/dev/null || true)
-    if [ -n "$USER_UID" ] && [ -d "/run/user/$USER_UID" ]; then
-        su -l "$REAL_USER" -c \
-            "XDG_RUNTIME_DIR=/run/user/$USER_UID \
-             systemctl --user daemon-reload && \
-             XDG_RUNTIME_DIR=/run/user/$USER_UID \
-             systemctl --user restart %{name}.service" \
-            2>/dev/null || true
+# Never enable the per-user unit alongside a system-level one. Both would bind
+# port 8765; the loser respawns forever on Restart=. Installs that hand-rolled
+# a system unit (usually to hardcode DISPLAY, which the packaged unit now
+# handles via graphical-session.target) keep working untouched.
+USE_SYSTEM_UNIT=0
+if systemctl is-enabled %{name}.service >/dev/null 2>&1; then
+    USE_SYSTEM_UNIT=1
+fi
+
+if [ "$USE_SYSTEM_UNIT" = "1" ]; then
+    echo "  ! A system-level %{name}.service is already enabled."
+    echo "    Leaving it in charge; NOT enabling the per-user service."
+    echo "    (Two instances would fight over port 8765.)"
+    systemctl --global disable %{name}.service 2>/dev/null || true
+    systemctl daemon-reload 2>/dev/null || true
+    systemctl restart %{name}.service 2>/dev/null || true
+else
+    systemctl --global enable %{name}.service 2>/dev/null || true
+    if [ -n "$REAL_USER" ]; then
+        USER_UID=$(id -u "$REAL_USER" 2>/dev/null || true)
+        if [ -n "$USER_UID" ] && [ -d "/run/user/$USER_UID" ]; then
+            su -l "$REAL_USER" -c \
+                "XDG_RUNTIME_DIR=/run/user/$USER_UID \
+                 systemctl --user daemon-reload && \
+                 XDG_RUNTIME_DIR=/run/user/$USER_UID \
+                 systemctl --user restart %{name}.service" \
+                2>/dev/null || true
+        fi
     fi
 fi
 

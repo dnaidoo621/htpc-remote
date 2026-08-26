@@ -34,35 +34,22 @@ rsync -a \
     --exclude='build-deb.sh' \
     --exclude='*.deb' \
     --exclude='.github' \
+    --exclude='systemd' \
     --exclude='venv' \
     --exclude='__pycache__' \
     --exclude='*.pyc' \
     --exclude='.gitignore' \
+    --exclude='.DS_Store' \
+    --exclude='._*' \
     "$SCRIPT_DIR/" "$APP_DEST/"
 
 # ── 3. Systemd user service → /usr/lib/systemd/user ──────────────────────────
+# Copied from systemd/htpc-remote.service, which is the single source of truth
+# shared with the .rpm. Do not inline a copy here — the two drifted apart once
+# already and shipped different WorkingDirectory values.
 SERVICE_DEST="$PKG_ROOT/usr/lib/systemd/user"
 mkdir -p "$SERVICE_DEST"
-cat > "$SERVICE_DEST/htpc-remote.service" <<'SERVICE'
-[Unit]
-Description=HTPC Remote Control Server (Glide)
-Documentation=https://github.com/dnaidoo621/htpc-remote
-After=network-online.target graphical-session.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-WorkingDirectory=/opt/htpc-remote
-ExecStart=/opt/htpc-remote/venv/bin/python /opt/htpc-remote/run.py
-Restart=on-failure
-RestartSec=5
-StandardOutput=journal
-StandardError=journal
-Environment="PYTHONUNBUFFERED=1"
-
-[Install]
-WantedBy=default.target
-SERVICE
+cp "$SCRIPT_DIR/systemd/htpc-remote.service" "$SERVICE_DEST/htpc-remote.service"
 
 # ── 4. udev rule → /etc/udev/rules.d ─────────────────────────────────────────
 UDEV_DEST="$PKG_ROOT/etc/udev/rules.d"
