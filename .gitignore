@@ -11,3 +11,10 @@ __pycache__/
 *.rpm
 *.zip
 *.tar.gz
+
+# Device config and Tuya credentials — never commit these
+devices.json
+tinytuya.json
+snapshot.json
+tuya-raw.json
+*_codes.json

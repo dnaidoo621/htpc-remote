@@ -4,6 +4,7 @@ import threading
 import uvicorn
 
 from .app import create_app
+from .devices import load_registry
 from .input import get_backend
 from .network import get_local_ip
 from .overlay import run_overlay
@@ -22,12 +23,15 @@ PORT = 8765
 def start() -> None:
     state = AppState()
     backend = get_backend()
+    devices = load_registry()
+    if len(devices):
+        logger.info("Loaded %d controllable device(s)", len(devices))
 
     local_ip = get_local_ip()
     state.server_url = f"http://{local_ip}:{PORT}"
     logger.info("Server URL: %s", state.server_url)
 
-    app = create_app(backend, state)
+    app = create_app(backend, state, devices)
 
     server_thread = threading.Thread(
         target=uvicorn.run,
@@ -42,3 +46,4 @@ def start() -> None:
         run_overlay(state)  # blocks in main thread (GTK main loop)
     finally:
         backend.cleanup()
+        devices.cleanup()

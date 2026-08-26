@@ -1,0 +1,44 @@
+{
+  "_comment": [
+    "Copy to ~/.config/htpc-remote/devices.json and chmod 600 — it holds secrets.",
+    "Override the location with the HTPC_REMOTE_DEVICES environment variable.",
+    "",
+    "Getting the values for a Tuya/Smart Life IR blaster:",
+    "  1. pip install tinytuya && python -m tinytuya wizard",
+    "     (needs a free iot.tuya.com cloud project linked to your Smart Life",
+    "      account; see the wiki page 'TV and IR Control')",
+    "  2. The wizard writes devices.json — take 'key' as local_key, plus the",
+    "     hub id and the per-TV remote id it lists.",
+    "",
+    "Transports, tried in order:",
+    "  local — replays learned base64 codes over the LAN. Fast, offline, but",
+    "          needs codes_file populated by learning from a physical remote.",
+    "  cloud — fires keys from the codeset Smart Life already configured.",
+    "          No learning needed; adds ~200-500ms and needs internet.",
+    "Omit the 'cloud' block for local-only, or 'codes_file' for cloud-only."
+  ],
+
+  "devices": [
+    {
+      "id": "tv",
+      "name": "LG TV",
+      "type": "tuya_ir",
+
+      "hub_id": "bfXXXXXXXXXXXXXXXXXX",
+      "remote_id": "bfYYYYYYYYYYYYYYYYYY",
+      "category_id": 2,
+
+      "host": "192.168.1.50",
+      "local_key": "XXXXXXXXXXXXXXXX",
+      "version": 3.5,
+
+      "cloud": {
+        "region": "eu",
+        "api_key": "XXXXXXXXXXXXXXXXXXXX",
+        "api_secret": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+      },
+
+      "codes_file": "lg_tv_codes.json"
+    }
+  ]
+}
