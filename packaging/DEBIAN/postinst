@@ -45,13 +45,35 @@ udevadm trigger            2>/dev/null || true
 
 # ── 4. Enable systemd user service for all users (global) ────────────────────
 echo "[3/5] Enabling systemd user service globally…"
-# This creates the symlink in /etc/systemd/user/default.target.wants/
-# so every user's session will start htpc-remote automatically.
-systemctl --user --global enable htpc-remote.service 2>/dev/null || true
+
+# Never enable the per-user unit alongside a system-level one. Both would bind
+# port 8765; the loser respawns forever on Restart=. Installs that hand-rolled
+# a system unit (usually to hardcode DISPLAY, which the packaged unit now
+# handles via graphical-session.target) keep working untouched.
+USE_SYSTEM_UNIT=0
+if systemctl is-enabled htpc-remote.service >/dev/null 2>&1; then
+    USE_SYSTEM_UNIT=1
+fi
+
+if [ "$USE_SYSTEM_UNIT" = "1" ]; then
+    echo "  ! A system-level htpc-remote.service is already enabled."
+    echo "    Leaving it in charge; NOT enabling the per-user service."
+    echo "    (Two instances would fight over port 8765.)"
+    # Undo a per-user unit enabled by an earlier version of this package.
+    systemctl --global disable htpc-remote.service 2>/dev/null || true
+else
+    # Symlinks into /etc/systemd/user/graphical-session.target.wants/ so every
+    # user's desktop session starts htpc-remote automatically.
+    systemctl --global enable htpc-remote.service 2>/dev/null || true
+fi
 
 # ── 5. Start the service now if the user is already logged in ─────────────────
 echo "[4/5] Starting service for current session (if applicable)…"
-if [ -n "$REAL_USER" ]; then
+if [ "$USE_SYSTEM_UNIT" = "1" ]; then
+    systemctl daemon-reload 2>/dev/null || true
+    systemctl restart htpc-remote.service 2>/dev/null || true
+    echo "  Restarted the system service."
+elif [ -n "$REAL_USER" ]; then
     USER_UID=$(id -u "$REAL_USER" 2>/dev/null || true)
     if [ -n "$USER_UID" ] && [ -d "/run/user/$USER_UID" ]; then
         su -l "$REAL_USER" -c \

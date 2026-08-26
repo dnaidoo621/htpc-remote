@@ -1,12 +1,26 @@
 [Unit]
-Description=HTPC Remote Control Server
-After=network-online.target graphical-session.target
+Description=HTPC Remote Control Server (Glide)
+Documentation=https://github.com/dnaidoo621/htpc-remote
+
+# Bound to graphical-session.target, NOT default.target.
+#
+# The server needs DISPLAY and XAUTHORITY to inject input (pynput/X11) and to
+# draw the QR overlay (GTK). The user manager only has those in its environment
+# once the desktop session has started and imported them. Starting at
+# default.target races the session and fails with "cannot open display", which
+# is why installs used to end up hand-rolling a system unit with DISPLAY
+# hardcoded — and then two units fought over port 8765.
+#
+# PartOf makes the service stop cleanly when the session ends.
+After=graphical-session.target
+PartOf=graphical-session.target
 Wants=network-online.target
+After=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/htpc-remote
-ExecStart=%h/htpc-remote/venv/bin/python run.py
+WorkingDirectory=/opt/htpc-remote
+ExecStart=/opt/htpc-remote/venv/bin/python /opt/htpc-remote/run.py
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal
@@ -14,4 +28,4 @@ StandardError=journal
 Environment="PYTHONUNBUFFERED=1"
 
 [Install]
-WantedBy=default.target
+WantedBy=graphical-session.target
