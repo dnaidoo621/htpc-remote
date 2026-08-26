@@ -37,6 +37,29 @@ _patched = False
 # How long a button press waits for the hub before giving up.
 SEND_WAIT = 3.0
 
+# A real IR frame is a few hundred base64 chars decoding to dozens of pulses.
+MIN_CODE_CHARS = 16
+MIN_CODE_PULSES = 8
+
+
+def valid_code(code) -> bool:
+    """
+    True if `code` is a usable base64 IR frame.
+
+    receive_button() does not always return a string — on a bad capture it
+    hands back tinytuya's error dict ({'Error': ..., 'Err': '904'}), which is
+    truthy and has a len(). Storing one poisons the local transport, so
+    everything gets checked before it is written.
+    """
+    if not isinstance(code, str) or len(code) < MIN_CODE_CHARS:
+        return False
+    try:
+        from tinytuya.Contrib import IRRemoteControlDevice
+        pulses = IRRemoteControlDevice.base64_to_pulses(code)
+    except Exception:
+        return False
+    return bool(pulses) and len(pulses) >= MIN_CODE_PULSES
+
 
 def ensure_http_timeout(seconds: int = HTTP_TIMEOUT) -> None:
     global _patched
@@ -234,8 +257,22 @@ class TuyaIRDevice(DeviceBackend):
                 except Exception:
                     pass
 
-            if not code:
-                logger.info("%s: nothing captured for %r", self.name, action)
+            if not valid_code(code):
+                # Distinguish "nobody pressed anything" from "the hub answered
+                # with something unusable" — they need different fixes.
+                if isinstance(code, dict):
+                    logger.warning(
+                        "%s: hub returned an error instead of a code for %r: %s",
+                        self.name, action,
+                        code.get("Error") or code.get("Payload") or code)
+                elif code:
+                    logger.warning(
+                        "%s: discarded malformed capture for %r (%r)",
+                        self.name, action, str(code)[:60])
+                else:
+                    logger.info("%s: nothing captured for %r — was the remote "
+                                "aimed at the hub, and does it have batteries?",
+                                self.name, action)
                 return False
 
             self._codes[action] = code

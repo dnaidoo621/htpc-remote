@@ -124,10 +124,25 @@ def _load_codes(path: str | None) -> dict[str, str]:
     try:
         with open(path) as f:
             codes = json.load(f)
-        logger.info("Loaded %d learned IR code(s) from %s", len(codes), path)
-        return codes
     except FileNotFoundError:
         return {}
     except (OSError, json.JSONDecodeError) as e:
         logger.warning("Could not read IR codes %s: %s", path, e)
         return {}
+
+    if not isinstance(codes, dict):
+        logger.warning("Ignoring %s — expected an object of action -> code", path)
+        return {}
+
+    # Drop anything unusable. Earlier versions could persist tinytuya's error
+    # dict as if it were a code; leaving those in would keep the local
+    # transport broken for that button after an upgrade.
+    from .tuya_ir import valid_code
+    good = {k: v for k, v in codes.items() if valid_code(v)}
+    if len(good) != len(codes):
+        bad = sorted(set(codes) - set(good))
+        logger.warning("Discarded %d unusable IR code(s) from %s: %s",
+                       len(bad), path, ", ".join(bad))
+    if good:
+        logger.info("Loaded %d learned IR code(s) from %s", len(good), path)
+    return good
