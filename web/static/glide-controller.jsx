@@ -376,6 +376,7 @@ function DevicePanel({ dev, flash }) {
       } else {
         setCapturing(null);
         if (m.state === 'captured')      flash(`Learned ${m.action}`);
+        else if (m.state === 'seeded')   flash(`Loaded ${m.count} codes`);
         else if (m.state === 'timeout')  flash('Nothing captured');
         else if (m.state === 'forgotten')flash(`Forgot ${m.action}`);
         else if (m.state === 'error')    flash(m.message || 'Learn failed');
@@ -451,6 +452,17 @@ function DevicePanel({ dev, flash }) {
                          : `${(dev.learned || []).length} learned`}
             </div>
           </div>
+          {/* Plenty of hubs can send locally but can't report a capture, so
+              seeding published codes is the reliable route — and needs no
+              working remote at all. */}
+          {!learnMode && (dev.learned || []).length === 0 && (
+            <button className="g-press"
+              onClick={() => { window.WS.seedDevice(dev.id, 'lg'); flash('Loading LG codes…'); }}
+              style={{ ...seg(false), flex: 'none', padding: '7px 12px', borderRadius: 10,
+                background: 'var(--g-glass-hi)', color: 'var(--g-text-2)' }}>
+              Load LG
+            </button>
+          )}
           <button className="g-press" onClick={() => setLearnMode((v) => !v)}
             style={{ ...seg(learnMode), flex: 'none', padding: '7px 14px', borderRadius: 10,
               background: learnMode ? 'var(--g-accent)' : 'var(--g-glass-hi)',
