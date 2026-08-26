@@ -158,6 +158,12 @@ class _QROverlay:
         self._status_label.set_text("Waiting for connection…")
         self._win.show_all()
 
+    def _show_pairing(self, code: str) -> None:
+        """Display the setup pairing code instead of the QR prompt."""
+        self._url_label.set_text("Enter this code on your phone")
+        self._status_label.set_text(code or "")
+        self._win.show_all()
+
     def _cancel_idle_timer(self) -> None:
         """Cancel any pending idle-timeout countdown."""
         if self._idle_timer_id is not None:
@@ -183,6 +189,13 @@ class _QROverlay:
     # ------------------------------------------------------------------ #
 
     def _on_state_change(self, state: AppState) -> bool:
+        # Setup mode outranks everything — the pairing code has to be readable
+        # on the TV even though the phone requesting it is already connected.
+        if state.setup_mode:
+            self._cancel_idle_timer()
+            self._show_pairing(state.setup_code)
+            return False
+
         if state.client_count > 0:
             # ── Device connected ──────────────────────────────────────────
             self._ever_connected = True
@@ -290,8 +303,21 @@ def _run_win32_overlay(state: AppState) -> None:
             logger.info("No device connected for %d s — showing QR popup.", IDLE_TIMEOUT_SECONDS)
             show_popup()
 
-    def handle_state(client_count: int) -> None:
+    def show_pairing(code: str) -> None:
+        url_label.configure(text="Enter this code on your phone")
+        status_label.configure(text=code or "")
+        root.deiconify()
+        root.lift()
+        root.attributes("-topmost", True)
+
+    def handle_state(client_count: int, setup_code: Optional[str] = None) -> None:
         """Runs on the tkinter main thread (scheduled via root.after)."""
+        # Setup mode outranks connection state — see the GTK overlay.
+        if setup_code:
+            cancel_timer()
+            show_pairing(setup_code)
+            return
+
         if client_count > 0:
             ctx["ever_connected"] = True
             cancel_timer()
@@ -307,7 +333,7 @@ def _run_win32_overlay(state: AppState) -> None:
                              IDLE_TIMEOUT_SECONDS)
 
     # root.after() is thread-safe; schedule all state handling onto the main thread
-    state.subscribe(lambda s: root.after(0, handle_state, s.client_count))
+    state.subscribe(lambda s: root.after(0, handle_state, s.client_count, s.setup_code))
 
     # Load QR after the event loop starts so the URL is definitely available
     root.after(200, load_qr)

@@ -18,8 +18,10 @@ DEFAULT_CONFIG = os.path.expanduser("~/.config/htpc-remote/devices.json")
 
 class DeviceRegistry:
 
-    def __init__(self, devices: list[DeviceBackend] | None = None) -> None:
+    def __init__(self, devices: list[DeviceBackend] | None = None,
+                 path: str | None = None) -> None:
         self._devices: dict[str, DeviceBackend] = {d.id: d for d in (devices or [])}
+        self.path = path
 
     def __len__(self) -> int:
         return len(self._devices)
@@ -29,6 +31,23 @@ class DeviceRegistry:
 
     def describe_all(self) -> list[dict]:
         return [d.describe() for d in self._devices.values()]
+
+    def reload(self) -> None:
+        """Rebuild from disk in place, so existing references stay valid."""
+        fresh = load_registry(self.path)
+        self.cleanup()
+        self._devices = fresh._devices
+        logger.info("Device registry reloaded — %d device(s)", len(self._devices))
+
+    def raw_entries(self) -> list[dict]:
+        """The on-disk config, secrets included. Never send this to a client."""
+        if not self.path or not os.path.exists(self.path):
+            return []
+        try:
+            with open(self.path) as f:
+                return json.load(f).get("devices", [])
+        except (OSError, json.JSONDecodeError):
+            return []
 
     def cleanup(self) -> None:
         for d in self._devices.values():
@@ -41,15 +60,15 @@ class DeviceRegistry:
 def load_registry(path: str | None = None) -> DeviceRegistry:
     path = path or os.environ.get("HTPC_REMOTE_DEVICES", DEFAULT_CONFIG)
     if not os.path.exists(path):
-        logger.info("No device config at %s — TV control disabled.", path)
-        return DeviceRegistry()
+        logger.info("No device config at %s — add one from the app's Setup screen.", path)
+        return DeviceRegistry(path=path)
 
     try:
         with open(path) as f:
             cfg = json.load(f)
     except (OSError, json.JSONDecodeError) as e:
         logger.error("Could not read device config %s: %s", path, e)
-        return DeviceRegistry()
+        return DeviceRegistry(path=path)
 
     devices: list[DeviceBackend] = []
     for entry in cfg.get("devices", []):
@@ -58,7 +77,7 @@ def load_registry(path: str | None = None) -> DeviceRegistry:
             devices.append(dev)
             logger.info("Device ready: %s (%s)", dev.name, dev.id)
 
-    return DeviceRegistry(devices)
+    return DeviceRegistry(devices, path=path)
 
 
 def _build(entry: dict, config_dir: str) -> DeviceBackend | None:

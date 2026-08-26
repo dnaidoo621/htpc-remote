@@ -2,11 +2,12 @@ import json
 import logging
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
+from . import setup as setup_mod
 from .devices import DeviceRegistry
 from .input.base import InputBackend
 from .network import generate_qr_bytes
@@ -37,6 +38,77 @@ def create_app(
     @app.get("/devices")
     async def device_list() -> dict:
         return {"devices": devices.describe_all()}
+
+    # ── setup ──────────────────────────────────────────────────────────── #
+    # Gated by a pairing code shown on the TV: anyone who scans the QR can
+    # drive the HTPC, but only someone who can see the screen may configure
+    # devices or enter cloud credentials.
+
+    session = setup_mod.SetupSession(state)
+
+    def _auth(request: Request) -> None:
+        if not session.valid(request.headers.get("x-setup-token")):
+            raise HTTPException(status_code=401, detail="setup session expired")
+
+    @app.post("/setup/begin")
+    async def setup_begin() -> dict:
+        session.begin()
+        return {"status": "code_displayed"}
+
+    @app.post("/setup/unlock")
+    async def setup_unlock(body: dict = Body(...)) -> dict:
+        token = session.unlock(str(body.get("code", "")))
+        if not token:
+            raise HTTPException(status_code=403, detail="wrong or expired code")
+        return {"token": token}
+
+    @app.post("/setup/end")
+    async def setup_end() -> dict:
+        session.end()
+        return {"status": "ended"}
+
+    @app.get("/setup/config")
+    async def setup_config(request: Request) -> dict:
+        _auth(request)
+        return {"devices": setup_mod.redact(devices.raw_entries())}
+
+    @app.post("/setup/scan")
+    async def setup_scan(request: Request) -> dict:
+        _auth(request)
+        return {"found": await run_in_threadpool(setup_mod.scan_lan, 12)}
+
+    @app.post("/setup/cloud")
+    async def setup_cloud(request: Request, body: dict = Body(...)) -> dict:
+        _auth(request)
+        found, err = await run_in_threadpool(
+            setup_mod.cloud_devices,
+            body.get("region", "eu"), body.get("api_key", ""),
+            body.get("api_secret", ""), body.get("device_id", ""),
+        )
+        if err:
+            raise HTTPException(status_code=400, detail=err)
+        return {"devices": found}
+
+    @app.post("/setup/save")
+    async def setup_save(request: Request, body: dict = Body(...)) -> dict:
+        _auth(request)
+        entries = body.get("devices")
+        if not isinstance(entries, list):
+            raise HTTPException(status_code=400, detail="'devices' must be a list")
+        for e in entries:
+            err = setup_mod.validate(e)
+            if err:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"device '{e.get('id', '?')}': {err}")
+        if not devices.path:
+            raise HTTPException(status_code=500, detail="no config path configured")
+        try:
+            await run_in_threadpool(setup_mod.save_config, entries, devices.path)
+            await run_in_threadpool(devices.reload)
+        except OSError as e:
+            raise HTTPException(status_code=500, detail=f"could not save: {e}")
+        return {"status": "saved", "devices": devices.describe_all()}
 
     @app.websocket("/ws")
     async def websocket_endpoint(ws: WebSocket) -> None:
