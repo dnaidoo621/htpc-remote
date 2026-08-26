@@ -57,6 +57,7 @@ function GlideController({ device = 'Living-Room PC' }) {
   const [scrollSpd,setScrollSpd]= useState(50);
   const [devices,  setDevices]  = useState(window.WS.getDevices());
   const [activeDev,setActiveDev]= useState(null);   // null = the HTPC itself
+  const [setup,    setSetup]    = useState(false);
 
   const tRef      = useRef(0);
   const hiddenInput = useRef(null);
@@ -204,21 +205,24 @@ function GlideController({ device = 'Living-Room PC' }) {
         </button>
       </div>
 
-      {/* device tabs — only when the server reports extra devices */}
-      {devices.length > 0 && (
-        <div style={{ display: 'flex', gap: 4, padding: 4, marginBottom: 10, borderRadius: 14,
-          background: 'rgba(0,0,0,0.3)', position: 'relative', zIndex: 2 }}>
-          <button onClick={() => { setActiveDev(null); setTab(null); }} style={seg(activeDev === null)}>
-            <GIcon name="mouse" size={15} />PC
+      {/* device tabs, plus a way in to setup when nothing is configured yet */}
+      <div style={{ display: 'flex', gap: 4, padding: 4, marginBottom: 10, borderRadius: 14,
+        background: 'rgba(0,0,0,0.3)', position: 'relative', zIndex: 2 }}>
+        <button onClick={() => { setActiveDev(null); setTab(null); }} style={seg(activeDev === null)}>
+          <GIcon name="mouse" size={15} />PC
+        </button>
+        {devices.map((d) => (
+          <button key={d.id} onClick={() => { setActiveDev(d.id); setTab(null); }}
+            style={seg(activeDev === d.id)}>
+            <GIcon name="film" size={15} />{d.name}
           </button>
-          {devices.map((d) => (
-            <button key={d.id} onClick={() => { setActiveDev(d.id); setTab(null); }}
-              style={seg(activeDev === d.id)}>
-              <GIcon name="film" size={15} />{d.name}
-            </button>
-          ))}
-        </div>
-      )}
+        ))}
+        <button onClick={() => setSetup(true)}
+          title="Add a device"
+          style={{ ...seg(false), flex: 'none', padding: '8px 12px' }}>
+          <GIcon name="gear" size={15} />{devices.length ? '' : 'Add TV'}
+        </button>
+      </div>
 
       {dev ? <DevicePanel dev={dev} flash={flash} /> : <>
       {/* trackpad + scroll strip */}
@@ -344,6 +348,9 @@ function GlideController({ device = 'Living-Room PC' }) {
 
       {/* ── KEYBOARD SHEET ── */}
       {kb && <KeyboardSheet {...{ typed, setTyped, setKb, flash, hiddenInput }} />}
+
+      {/* ── DEVICE SETUP ── */}
+      {setup && <GlideSetup onClose={() => setSetup(false)} />}
     </div>
   );
 }

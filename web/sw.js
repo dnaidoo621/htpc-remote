@@ -8,7 +8,7 @@
  * deleted automatically during activate).
  */
 
-const CACHE_VERSION = 'glide-v4';
+const CACHE_VERSION = 'glide-v5';
 
 const STATIC_ASSETS = [
   '/',
@@ -18,6 +18,7 @@ const STATIC_ASSETS = [
   '/static/glide-ui.jsx',
   '/static/glide-connect.jsx',
   '/static/glide-controller.jsx',
+  '/static/glide-setup.jsx',
   '/static/react.min.js',
   '/static/react-dom.min.js',
   '/static/babel.min.js',
@@ -58,6 +59,9 @@ self.addEventListener('fetch', (event) => {
     request.headers.get('upgrade') === 'websocket' ||
     url.pathname === '/qr.png' ||
     url.pathname === '/health' ||
+    url.pathname === '/devices' ||          // live state, never cache
+    url.pathname.startsWith('/setup') ||    // credentials + config, never cache
+    request.method !== 'GET' ||
     url.origin !== self.location.origin
   ) {
     return;

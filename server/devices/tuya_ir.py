@@ -28,6 +28,35 @@ from .base import (
 
 logger = logging.getLogger(__name__)
 
+# tinytuya calls requests.get/request without a timeout, so a stalled network
+# would hang a threadpool worker indefinitely. requests is only used by tinytuya
+# in this process, so defaulting it globally is safe and contained.
+HTTP_TIMEOUT = 15
+_patched = False
+
+# How long a button press waits for the hub before giving up.
+SEND_WAIT = 3.0
+
+
+def ensure_http_timeout(seconds: int = HTTP_TIMEOUT) -> None:
+    global _patched
+    if _patched:
+        return
+    try:
+        import requests
+    except ImportError:
+        return
+    for name in ("get", "post", "request"):
+        original = getattr(requests, name)
+
+        def wrapper(*a, _orig=original, **kw):
+            kw.setdefault("timeout", seconds)
+            return _orig(*a, **kw)
+
+        setattr(requests, name, wrapper)
+    _patched = True
+    logger.debug("Defaulted requests timeout to %ss", seconds)
+
 # Normalised action -> (Tuya key name, Tuya key id).
 # Key ids come from GET /v1.0/infrareds/{hub}/remotes/{remote}/keys.
 TV_KEYS: dict[str, tuple[str, int]] = {
@@ -118,6 +147,7 @@ class TuyaIRDevice(DeviceBackend):
             return None
         try:
             import tinytuya
+            ensure_http_timeout()
             return tinytuya.Cloud(
                 apiRegion=cfg["region"],
                 apiKey=cfg["api_key"],
@@ -154,7 +184,12 @@ class TuyaIRDevice(DeviceBackend):
         return sorted(self._codes)
 
     def send(self, action: str, value: str | int | None = None) -> bool:
-        with self._lock:
+        # A capture holds the hub for up to a minute. Don't let button presses
+        # from other phones pile up behind it — fail fast and say why.
+        if not self._lock.acquire(timeout=SEND_WAIT):
+            logger.info("%s: busy (learning?) — dropped %r", self.name, action)
+            return False
+        try:
             code = self._codes.get(action)
             if self._local and code:
                 if self._send_local(code):
@@ -167,6 +202,8 @@ class TuyaIRDevice(DeviceBackend):
                 logger.warning("%s: unknown action %r", self.name, action)
                 return False
             return self._send_cloud(*entry)
+        finally:
+            self._lock.release()
 
     # ── learning ───────────────────────────────────────────────────────── #
 
@@ -180,7 +217,11 @@ class TuyaIRDevice(DeviceBackend):
             logger.warning("%s: cannot learn without a LAN connection", self.name)
             return False
 
-        with self._lock:
+        # Two phones must not both drive the hub into study mode.
+        if not self._lock.acquire(blocking=False):
+            logger.info("%s: busy — refusing concurrent learn", self.name)
+            return False
+        try:
             try:
                 self._local.study_start()
                 code = self._local.receive_button(timeout=timeout)
@@ -201,6 +242,8 @@ class TuyaIRDevice(DeviceBackend):
             self._persist()
             logger.info("%s: learned %r (%d chars)", self.name, action, len(code))
             return True
+        finally:
+            self._lock.release()
 
     def forget(self, action: str) -> bool:
         with self._lock:

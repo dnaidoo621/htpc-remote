@@ -1,5 +1,5 @@
 import threading
-from typing import Callable
+from typing import Callable, Optional
 
 
 class AppState:
@@ -8,6 +8,9 @@ class AppState:
         self._client_count = 0
         self._server_url = ""
         self._on_change: list[Callable] = []
+        # Setup mode forces the overlay open with a pairing code, proving the
+        # person configuring devices can actually see the TV.
+        self._setup_code: Optional[str] = None
 
     def subscribe(self, fn: Callable) -> None:
         self._on_change.append(fn)
@@ -27,6 +30,25 @@ class AppState:
     @server_url.setter
     def server_url(self, value: str) -> None:
         self._server_url = value
+
+    @property
+    def setup_code(self) -> Optional[str]:
+        return self._setup_code
+
+    @property
+    def setup_mode(self) -> bool:
+        return self._setup_code is not None
+
+    def start_setup(self, code: str) -> None:
+        """Show `code` on the TV so the phone can prove it's in the room."""
+        with self._lock:
+            self._setup_code = code
+        self._notify()
+
+    def end_setup(self) -> None:
+        with self._lock:
+            self._setup_code = None
+        self._notify()
 
     def client_connected(self) -> None:
         with self._lock:
