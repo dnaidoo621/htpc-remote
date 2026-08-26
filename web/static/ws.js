@@ -10,14 +10,15 @@ window.HTPC = {
 window.WS = (() => {
   let ws        = null;
   let connected = false;
-  const listeners = { connect: [], disconnect: [] };
+  let devices   = [];   // extra controllable devices (TV, receiver…)
+  const listeners = { connect: [], disconnect: [], devices: [] };
 
   /* ── subscription helper ── */
   function on(event, fn) {
     listeners[event].push(fn);
     return () => { listeners[event] = listeners[event].filter((f) => f !== fn); };
   }
-  function emit(event) { listeners[event].forEach((f) => f()); }
+  function emit(event, arg) { listeners[event].forEach((f) => f(arg)); }
 
   /* ── batched mouse-move (one send per animation frame) ── */
   let pending   = null;
@@ -64,19 +65,32 @@ window.WS = (() => {
     ws.onopen    = () => { connected = true;  emit('connect'); };
     ws.onclose   = () => { connected = false; emit('disconnect'); setTimeout(connect, 3000); };
     ws.onerror   = () => ws.close();
-    ws.onmessage = () => {}; // reserved for future server→client events
+    ws.onmessage = (ev) => {
+      let msg;
+      try { msg = JSON.parse(ev.data); } catch { return; }
+      if (msg.type === 'connected' && Array.isArray(msg.devices)) {
+        devices = msg.devices;
+        emit('devices', devices);
+      }
+    };
   }
   connect();
 
   return {
     onConnect:    (fn) => on('connect', fn),
     onDisconnect: (fn) => on('disconnect', fn),
+    onDevices:    (fn) => on('devices', fn),
     isConnected:  ()  => connected,
+    getDevices:   ()  => devices,
 
     send(obj) {
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify(obj));
       }
+    },
+    /* Fire an action at a non-HTPC device (TV, receiver…). */
+    sendDevice(device, action, value) {
+      this.send({ type: 'device', device, action, value });
     },
     queueMove,
     queueScroll,

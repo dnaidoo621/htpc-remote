@@ -55,6 +55,8 @@ function GlideController({ device = 'Living-Room PC' }) {
   const [uiBright, setUiBright] = useState(100);  // UI self-dimming %
   const [sens,     setSens]     = useState(60);
   const [scrollSpd,setScrollSpd]= useState(50);
+  const [devices,  setDevices]  = useState(window.WS.getDevices());
+  const [activeDev,setActiveDev]= useState(null);   // null = the HTPC itself
 
   const tRef      = useRef(0);
   const hiddenInput = useRef(null);
@@ -63,8 +65,16 @@ function GlideController({ device = 'Living-Room PC' }) {
   useEffect(() => {
     const off1 = window.WS.onConnect(()    => setWsOk(true));
     const off2 = window.WS.onDisconnect(() => setWsOk(false));
-    return () => { off1(); off2(); };
+    const off3 = window.WS.onDevices(setDevices);
+    return () => { off1(); off2(); off3(); };
   }, []);
+
+  /* A device tab is only meaningful while it still exists. */
+  useEffect(() => {
+    if (activeDev && !devices.some((d) => d.id === activeDev)) setActiveDev(null);
+  }, [devices, activeDev]);
+
+  const dev = devices.find((d) => d.id === activeDev) || null;
 
   /* ── sync sensitivity to window.HTPC ── */
   useEffect(() => { window.HTPC.sensitivity  = 0.5 + (sens / 100) * 3.5; }, [sens]);
@@ -194,6 +204,23 @@ function GlideController({ device = 'Living-Room PC' }) {
         </button>
       </div>
 
+      {/* device tabs — only when the server reports extra devices */}
+      {devices.length > 0 && (
+        <div style={{ display: 'flex', gap: 4, padding: 4, marginBottom: 10, borderRadius: 14,
+          background: 'rgba(0,0,0,0.3)', position: 'relative', zIndex: 2 }}>
+          <button onClick={() => { setActiveDev(null); setTab(null); }} style={seg(activeDev === null)}>
+            <GIcon name="mouse" size={15} />PC
+          </button>
+          {devices.map((d) => (
+            <button key={d.id} onClick={() => { setActiveDev(d.id); setTab(null); }}
+              style={seg(activeDev === d.id)}>
+              <GIcon name="film" size={15} />{d.name}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {dev ? <DevicePanel dev={dev} flash={flash} /> : <>
       {/* trackpad + scroll strip */}
       <div style={{ flex: 1, display: 'flex', gap: 10, position: 'relative', zIndex: 1, minHeight: 0 }}>
         {/* trackpad */}
@@ -273,6 +300,7 @@ function GlideController({ device = 'Living-Room PC' }) {
           <GIcon name="apps" size={18} />
         </GBtn>
       </div>
+      </>}
 
       {/* toast */}
       {toast && (
@@ -316,6 +344,100 @@ function GlideController({ device = 'Living-Room PC' }) {
 
       {/* ── KEYBOARD SHEET ── */}
       {kb && <KeyboardSheet {...{ typed, setTyped, setKb, flash, hiddenInput }} />}
+    </div>
+  );
+}
+
+/* ── device panel (TV, receiver…) ──────────────────────────────────────────
+   Rendered instead of the trackpad when a device tab is selected.  Sections
+   appear only if the device declares the capability AND reports the action,
+   so a new backend needs no changes here.                                   */
+function DevicePanel({ dev, flash }) {
+  const can  = (c) => dev.capabilities.includes(c);
+  const has  = (a) => dev.actions.includes(a);
+  const fire = (action, label) => {
+    window.WS.sendDevice(dev.id, action);
+    flash(label);
+  };
+
+  const row = (children, h = 54) => (
+    <div style={{ display: 'flex', gap: 8, height: h }}>{children}</div>
+  );
+  const btn = (action, label, icon, opts = {}) => has(action) && (
+    <GBtn key={action} flex={opts.flex || 1} accent={opts.accent} danger={opts.danger}
+      onPress={() => fire(action, label)}
+      style={{ gap: 7, ...(opts.style || {}) }}>
+      {icon && <GIcon name={icon} size={opts.iconSize || 19} />}
+      {opts.showLabel !== false &&
+        <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--g-text-2)' }}>{label}</span>}
+    </GBtn>
+  );
+
+  const dpad = (action, icon) => (
+    <GBtn onPress={() => fire(action, action)} style={{ borderRadius: 15 }}>
+      <GIcon name={icon} size={22} />
+    </GBtn>
+  );
+  const blank = <div />;
+  const hdmis = ['hdmi1', 'hdmi2', 'hdmi3', 'hdmi4'].filter(has);
+
+  return (
+    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex',
+      flexDirection: 'column', gap: 12, position: 'relative', zIndex: 1, paddingBottom: 4 }}>
+
+      {/* power — 'power_on' is discrete, so it's the safe primary */}
+      {can('power') && row(<>
+        {btn('power_on', 'On', 'power', { accent: true })}
+        {btn('power', 'Toggle', 'power')}
+        {btn('input', 'Source', 'film')}
+      </>)}
+
+      {/* direct source selection — idempotent, unlike cycling with 'input' */}
+      {can('input_select') && hdmis.length > 0 && row(
+        hdmis.map((h) => btn(h, h.toUpperCase().replace('HDMI', 'HDMI '), null,
+          { showLabel: true })), 44)}
+
+      {/* d-pad */}
+      {can('nav') && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)',
+          gridAutoRows: 58, gap: 8, maxWidth: 250, margin: '2px auto', width: '100%' }}>
+          {blank}{dpad('up', 'chevUp')}{blank}
+          {dpad('left', 'chevLeft')}
+          <GBtn accent onPress={() => fire('ok', 'OK')} style={{ borderRadius: 999 }}>
+            <GIcon name="ok" size={22} />
+          </GBtn>
+          {dpad('right', 'chevRight')}
+          {blank}{dpad('down', 'chevDown')}{blank}
+        </div>
+      )}
+
+      {can('nav') && row(<>
+        {btn('back', 'Back', 'esc')}
+        {btn('home', 'Home', 'apps')}
+        {btn('menu', 'Menu', 'sliders')}
+      </>, 48)}
+
+      {/* volume */}
+      {can('volume') && row(<>
+        {btn('volume_down', 'Vol −', 'volLow', { showLabel: false, flex: 1.3 })}
+        {btn('mute', 'Mute', 'mute', { showLabel: false })}
+        {btn('volume_up', 'Vol +', 'volume', { showLabel: false, flex: 1.3 })}
+      </>)}
+
+      {/* transport */}
+      {can('media') && row(<>
+        {btn('previous', 'Prev', 'prev', { showLabel: false })}
+        {btn('rewind', 'Rew', 'back10', { showLabel: false })}
+        {btn('play', 'Play', 'play', { showLabel: false })}
+        {btn('pause', 'Pause', 'pause', { showLabel: false })}
+        {btn('forward', 'Fwd', 'fwd10', { showLabel: false })}
+      </>, 50)}
+
+      {/* channels */}
+      {can('channel') && row(<>
+        {btn('channel_down', 'Ch −', 'chevDown')}
+        {btn('channel_up', 'Ch +', 'chevUp')}
+      </>, 46)}
     </div>
   );
 }
