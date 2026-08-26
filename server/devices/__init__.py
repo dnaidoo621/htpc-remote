@@ -98,7 +98,7 @@ def _build(entry: dict, config_dir: str) -> DeviceBackend | None:
                 cloud=entry.get("cloud"),
                 codes=_load_codes(codes_path),
                 codes_path=codes_path,
-                local_control=entry.get("local_control", False),
+                local_control=entry.get("local_control", True),
             )
     except KeyError as e:
         logger.error("Device %r missing required field %s", entry.get("id"), e)

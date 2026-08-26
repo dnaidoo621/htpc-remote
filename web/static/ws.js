@@ -109,6 +109,10 @@ window.WS = (() => {
     forgetDevice(device, action) {
       this.send({ type: 'device_forget', device, action });
     },
+    /* Fill the local code table from published codes — no remote needed. */
+    seedDevice(device, brand) {
+      this.send({ type: 'device_seed', device, brand });
+    },
     queueMove,
     queueScroll,
   };

@@ -15,19 +15,19 @@ Library codesets (the ones you get by picking "LG" in the app) live on Tuya's
 servers and are not downloadable, which is why the cloud transport exists at
 all.  Learned codes land in the local file and silently take precedence.
 
-local_control defaults to OFF, because a good number of these hubs are
-cloud-only for infrared and there is no way to detect it from the protocol.
-A Vizia Smart IR (category wnykq, protocol 3.5) was measured doing exactly
-this: the session key negotiates, DP writes are accepted and acknowledged
-with retcode=0 and an empty payload, and no infrared is ever emitted. Study
-mode silently fails the same way, so capture never returns anything either,
-while identical commands through the cloud drive the TV correctly.
+The local protocol is the single-DP kind: DP 201 takes a JSON command and
+DP 202 reports learned codes.  The payload shape matters more than it looks —
+tinytuya's IRRemoteControlDevice omits the "delay" field on send, and this
+hardware silently ignores the command without it.  Writes are still accepted
+and acknowledged with retcode=0, so a dropped command is indistinguishable
+from a delivered one, which makes the failure very easy to misread as the
+hub being cloud-only.  The shapes here follow make-all/tuya-local, which
+lists this exact hardware.
 
-Since a failed local write is indistinguishable from a successful one, the
-only honest default is to trust the cloud and let anyone whose hub really
-does support local control opt in with "local_control": true.  Teach is only
-offered when local control is on, so the UI never shows a button that cannot
-work.
+Local sends are only used for actions that have a learned code, which makes
+the arrangement self-validating: a code can only have been learned if the
+local path works, so a hub that doesn't support it simply never accumulates
+codes and everything keeps running through the cloud.
 """
 import json
 import logging
@@ -51,6 +51,15 @@ _patched = False
 
 # How long a button press waits for the hub before giving up.
 SEND_WAIT = 3.0
+
+# Single-DP IR protocol: DP 201 takes a JSON command, DP 202 reports learned
+# codes. Shapes confirmed against make-all/tuya-local, which lists this exact
+# hardware (product key keycmhjv873dhvsn, an Avatto S06/S16-class blaster).
+DP_SEND = "201"
+DP_RECEIVE = "202"
+CMD_SEND = "send_ir"
+CMD_STUDY = "study"
+CMD_STUDY_EXIT = "study_exit"
 
 # A real IR frame is a few hundred base64 chars decoding to dozens of pulses.
 MIN_CODE_CHARS = 16
@@ -139,6 +148,40 @@ TV_KEYS: dict[str, tuple[str, int]] = {
 }
 
 
+# Published NEC codes, so a working set can be built without ever pressing a
+# physical remote — useful because plenty of these hubs can send locally but
+# cannot report a learned code back (no status polling, nothing pushed on
+# DP 202). Verified on an LG 55UK6200PVA: a frame captured from the real
+# remote decoded to 0x20DF02FD, byte-identical to the synthesised 'up' below.
+KNOWN_CODES: dict[str, dict[str, int]] = {
+    "lg": {
+        "power":        0x20DF10EF,   # toggle
+        "power_on":     0x20DF23DC,   # discrete, idempotent
+        "volume_up":    0x20DF40BF,
+        "volume_down":  0x20DFC03F,
+        "mute":         0x20DF906F,
+        "channel_up":   0x20DF00FF,
+        "channel_down": 0x20DF807F,
+        "up":           0x20DF02FD,
+        "down":         0x20DF827D,
+        "left":         0x20DFE01F,
+        "right":        0x20DF609F,
+        "ok":           0x20DF22DD,
+        "back":         0x20DF14EB,
+        "home":         0x20DF3EC1,
+        "menu":         0x20DFC23D,
+        "exit":         0x20DFDA25,
+        "input":        0x20DFD02F,
+        "info":         0x20DF55AA,
+        "play":         0x20DF0CF3,
+        "pause":        0x20DF8D72,
+        "stop":         0x20DF8877,
+        "rewind":       0x20DF0FF0,
+        "forward":      0x20DF8F70,
+    },
+}
+
+
 class TuyaIRDevice(DeviceBackend):
 
     def __init__(
@@ -154,7 +197,7 @@ class TuyaIRDevice(DeviceBackend):
         cloud: dict | None = None,
         codes: dict[str, str] | None = None,
         codes_path: str | None = None,
-        local_control: bool = False,
+        local_control: bool = True,
     ) -> None:
         self.id = id
         self.name = name
@@ -199,17 +242,14 @@ class TuyaIRDevice(DeviceBackend):
             return None
 
     def _init_local(self, hub_id, host, local_key, version):
-        # Off by default — see the local_control note in the class docstring.
         # Needed to replay learned codes *and* to learn new ones, so connect
         # whenever we have credentials, even with no codes stored yet.
         if not (host and local_key):
             return None
         try:
-            from tinytuya.Contrib import IRRemoteControlDevice
-            dev = IRRemoteControlDevice(
-                hub_id, host, local_key, version=version,
-                control_type=2, persist=True,
-            )
+            import tinytuya
+            dev = tinytuya.Device(hub_id, host, local_key, version=version)
+            dev.set_socketPersistent(True)
             dev.set_socketTimeout(5)
             return dev
         except Exception as e:
@@ -295,12 +335,17 @@ class TuyaIRDevice(DeviceBackend):
             self._lock.release()
 
     # Data points the hub reports a freshly-learned code on.
-    _DP_LEARNED_REPORT = "2"    # newer hardware (control_type 2)
-    _DP_LEARNED_ID = "202"      # older hardware (control_type 1)
+    def _study(self, control: str) -> None:
+        """Enter or leave learning mode."""
+        try:
+            self._local.set_value(DP_SEND, json.dumps({"control": control}),
+                                  nowait=True)
+        except Exception as e:
+            logger.debug("%s: study %s failed: %s", self.name, control, e)
 
     def _capture(self, timeout: int) -> str | None:
         """
-        Listen for one learned code.
+        Listen for one learned code, reported on DP 202.
 
         Not tinytuya's receive_button(): that breaks out of its listen loop on
         the first frame that isn't a dps message, and this hardware emits an
@@ -309,7 +354,7 @@ class TuyaIRDevice(DeviceBackend):
         we don't recognise and keep listening until the clock runs out.
         """
         dev = self._local
-        dev.study_end()      # clear any half-finished session
+        self._study(CMD_STUDY_EXIT)   # clear any half-finished session
 
         # The hub buffers a learned code and replays it to the next listener.
         # Without draining, a press from a previous session gets attributed to
@@ -323,11 +368,10 @@ class TuyaIRDevice(DeviceBackend):
                 break
             if not isinstance(stale, dict) or "dps" not in stale:
                 continue
-            if any(stale["dps"].get(dp) for dp in
-                   (self._DP_LEARNED_REPORT, self._DP_LEARNED_ID)):
+            if stale["dps"].get(DP_RECEIVE):
                 logger.debug("%s: discarded a buffered code before capture", self.name)
 
-        dev.study_start()
+        self._study(CMD_STUDY)
         deadline = time.monotonic() + timeout
         try:
             while time.monotonic() < deadline:
@@ -339,17 +383,48 @@ class TuyaIRDevice(DeviceBackend):
                     continue
                 if not isinstance(frame, dict) or "dps" not in frame:
                     continue          # timeout or an error frame — keep waiting
-                dps = frame["dps"]
-                for dp in (self._DP_LEARNED_REPORT, self._DP_LEARNED_ID):
-                    if dps.get(dp):
-                        return dps[dp]
+                if frame["dps"].get(DP_RECEIVE):
+                    return frame["dps"][DP_RECEIVE]
         finally:
-            try:
-                dev.study_end()
-            except Exception:
-                pass
+            self._study(CMD_STUDY_EXIT)
             dev.set_socketTimeout(5)
         return None
+
+    def seed_known_codes(self, brand: str) -> int:
+        """
+        Fill the local code table from published NEC values.
+
+        The alternative to Teach for hubs that can send locally but can't
+        report a capture. Returns how many codes were added; existing entries
+        are left alone so a genuinely learned code always wins.
+        """
+        table = KNOWN_CODES.get(brand.lower())
+        if not table:
+            logger.warning("%s: no known codes for brand %r", self.name, brand)
+            return 0
+        try:
+            from tinytuya.Contrib import IRRemoteControlDevice as _IR
+        except ImportError:
+            logger.warning("%s: tinytuya missing — cannot synthesise codes", self.name)
+            return 0
+
+        added = 0
+        with self._lock:
+            for action, nec in table.items():
+                if action in self._codes:
+                    continue
+                try:
+                    code = _IR.pulses_to_base64(_IR.nec_to_pulses(nec))
+                except Exception as e:
+                    logger.debug("%s: could not encode %s: %s", self.name, action, e)
+                    continue
+                if valid_code(code):
+                    self._codes[action] = code
+                    added += 1
+            if added:
+                self._persist()
+        logger.info("%s: seeded %d %s code(s)", self.name, added, brand.upper())
+        return added
 
     def forget(self, action: str) -> bool:
         with self._lock:
@@ -377,7 +452,15 @@ class TuyaIRDevice(DeviceBackend):
 
     def _send_local(self, b64: str) -> bool:
         try:
-            self._local.send_button(b64)
+            self._local.set_value(DP_SEND, json.dumps({
+                "control": CMD_SEND,
+                "head": "",
+                # A leading '0' means "use head"; anything else is discarded,
+                # so '1' is the conventional marker for a raw learned code.
+                "key1": "1" + b64,
+                "type": 0,
+                "delay": 0,
+            }), nowait=True)
             return True
         except Exception as e:
             logger.debug("local IR send failed: %s", e)

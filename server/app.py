@@ -185,6 +185,17 @@ async def _handle_message(
     elif t == "device_learn":
         await _handle_learn(msg, devices, ws)
 
+    elif t == "device_seed":
+        device = devices.get(msg.get("device", ""))
+        brand = msg.get("brand", "")
+        if device and brand and hasattr(device, "seed_known_codes"):
+            n = await run_in_threadpool(device.seed_known_codes, brand)
+            await _send(ws, {"type": "learn",
+                             "state": "seeded" if n else "error",
+                             "device": device.id, "action": brand, "count": n,
+                             "message": None if n else f"no known codes for {brand}",
+                             "learned": device.learned()})
+
     elif t == "device_forget":
         device = devices.get(msg.get("device", ""))
         action = msg.get("action", "")
