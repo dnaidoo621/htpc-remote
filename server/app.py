@@ -51,7 +51,7 @@ def create_app(
                 "devices": devices.describe_all(),
             }))
             async for raw in ws.iter_text():
-                await _handle_message(raw, backend, devices)
+                await _handle_message(raw, backend, devices, ws)
         except WebSocketDisconnect:
             pass
         finally:
@@ -68,6 +68,7 @@ async def _handle_message(
     raw: str,
     backend: InputBackend,
     devices: DeviceRegistry,
+    ws: WebSocket | None = None,
 ) -> None:
     try:
         msg = json.loads(raw)
@@ -109,5 +110,55 @@ async def _handle_message(
             # off the event loop so mouse movement stays smooth.
             await run_in_threadpool(device.send, action, msg.get("value"))
 
+    elif t == "device_learn":
+        await _handle_learn(msg, devices, ws)
+
+    elif t == "device_forget":
+        device = devices.get(msg.get("device", ""))
+        action = msg.get("action", "")
+        if device and action:
+            await run_in_threadpool(device.forget, action)
+            await _send(ws, {"type": "learn", "state": "forgotten",
+                             "device": device.id, "action": action,
+                             "learned": device.learned()})
+
     else:
         logger.debug("Unknown message type: %s", t)
+
+
+async def _send(ws: WebSocket | None, payload: dict) -> None:
+    if ws is None:
+        return
+    try:
+        await ws.send_text(json.dumps(payload))
+    except (WebSocketDisconnect, RuntimeError):
+        pass
+
+
+async def _handle_learn(
+    msg: dict,
+    devices: DeviceRegistry,
+    ws: WebSocket | None,
+) -> None:
+    """Capture one press from a physical remote, reporting progress."""
+    device = devices.get(msg.get("device", ""))
+    action = msg.get("action", "")
+    if not device or not action:
+        await _send(ws, {"type": "learn", "state": "error",
+                         "action": action, "message": "unknown device or action"})
+        return
+
+    timeout = max(5, min(int(msg.get("timeout", 30)), 60))
+    # Tell the phone to prompt the user *before* we block on the capture.
+    await _send(ws, {"type": "learn", "state": "waiting",
+                     "device": device.id, "action": action, "timeout": timeout})
+
+    ok = await run_in_threadpool(device.learn, action, timeout)
+
+    await _send(ws, {
+        "type": "learn",
+        "state": "captured" if ok else "timeout",
+        "device": device.id,
+        "action": action,
+        "learned": device.learned(),
+    })
