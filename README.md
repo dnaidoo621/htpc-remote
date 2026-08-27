@@ -19,7 +19,10 @@ The popup is smart about when it comes back. Locking your phone, switching apps,
 - **App launcher** — one tap to open Jellyfin, Plex, Kodi, Spotify, YouTube, browser
 - **Text input** — native mobile keyboard, sends text directly to the focused field
 - **Tune panel** — adjust pointer speed, scroll speed, and screen brightness from the remote
+- **Control your TV too** — add an IR blaster and get a **TV tab** beside the PC tab: power, volume, HDMI input, d-pad, transport. See [TV and IR control](#tv-and-ir-control)
+- **Set up from the phone** — no terminal, no hand-edited config; a code on the TV keeps it to whoever's in the room
 - **X11 and Wayland** — auto-detected at startup on Linux, no config needed
+- **Installable** — add it to your home screen and it runs fullscreen like an app
 
 ---
 
@@ -237,6 +240,57 @@ To customise, edit `APP_COMMANDS` (Linux) or `APP_COMMANDS_WIN` (Windows) in `se
 
 ---
 
+## TV and IR control
+
+Glide can drive more than the HTPC. Add a **Tuya / Smart Life IR blaster** (Vizia, Avatto, MOES and the many rebadges of the same hardware) and your phone gets a **TV tab** next to the PC tab.
+
+### Setting it up
+
+Everything happens on the phone — no terminal, no editing JSON.
+
+1. Add your TV in the **Smart Life** app first, so the hub knows which codeset to use
+2. Create a free cloud project at [iot.tuya.com](https://iot.tuya.com), link your Smart Life account, and note the **Access ID** and **Access Secret**
+3. In Glide, tap the **gear** in the device tab strip → **Show code on TV**
+4. Type the six-digit code that appears on the TV
+5. Enter your Tuya credentials → **Find my devices** → pick your TV → **Save**
+
+The device appears immediately; no restart. Config is written to `~/.config/htpc-remote/devices.json` at mode `600`.
+
+> **Why the code on the TV?** Anyone who scans Glide's QR can drive the HTPC — fine for a remote, not fine for a screen showing cloud credentials. Requiring a code off the TV limits setup to whoever is actually in the room. It does **not** encrypt the LAN: Glide is served over plain HTTP, so credentials cross the network in the clear. They're stored readable only by you and are never sent back to the browser.
+
+### Two transports
+
+| | Local | Cloud |
+|---|---|---|
+| Speed | ~20 ms | ~200–500 ms |
+| Works offline | ✅ | ❌ |
+| Needs a Tuya subscription | ❌ | ✅ (IoT Core, which expires) |
+| Needs stored codes | ✅ | ❌ |
+
+Local is tried first for any action that has a stored code, with automatic fallback to the cloud. Since a code can only be stored if the local path works, a hub that can't send locally simply never accumulates any and everything runs through the cloud.
+
+### Getting local codes
+
+Two routes, both in the TV tab:
+
+- **Load LG** — one tap, synthesises 23 codes from published NEC values. No remote needed. Works even if your hub can't capture
+- **Teach** — tap a button, press the matching key on a physical remote. Requires a hub that reports captures; many don't (see below)
+
+### Known hardware quirks
+
+These cost real debugging time, so they're written down:
+
+- **`tinytuya` omits a field this hardware requires.** Its DP 201 payload leaves out `"delay"`, and affected hubs then *accept the write, acknowledge it with `retcode=0`, and silently discard it*. A dropped command is indistinguishable from a delivered one. Glide talks DP 201/202 directly with the correct payload rather than using `IRRemoteControlDevice`
+- **Many hubs cannot report a capture.** Status polling returns error 900 and nothing is pushed on DP 202, so Teach times out no matter how long you wait or how many times you press. Use **Load LG** instead
+- **Library codesets aren't downloadable.** Picking "LG" in Smart Life stores a *pointer* to a codeset on Tuya's servers; `learning-codes` returns `[]` and every raw-code endpoint 404s. That's why the cloud transport exists
+- **Success responses mean nothing.** Both Tuya's cloud (`result: true`) and the local protocol (`retcode=0`) report success for commands that never emit infrared. Only the TV moving proves anything
+
+### Supported actions
+
+Power (toggle and discrete on), volume ±, mute, channel ±, d-pad with OK/Back/Home/Menu/Exit, transport (play/pause/stop/rewind/forward), and direct **HDMI 1–4** input selection. `power_on` and the HDMI keys are idempotent, so they're more reliable than toggles when the app can't know the TV's state.
+
+---
+
 ## Service management
 
 ### Linux (systemd)
@@ -350,6 +404,36 @@ sudo dnf install wtype      # Fedora
 sudo pacman -S wtype        # Arch
 ```
 
+**"Another instance is already running on 8765"**
+
+You have both a system-level and a per-user service enabled. Keep one:
+
+```bash
+sudo systemctl --global disable htpc-remote   # keep the system unit
+```
+
+Older packages enabled a per-user unit that fought a hand-made system unit for the port; the loser respawned forever. Current packages detect this and skip it.
+
+**TV tab does nothing**
+
+Check in this order — and trust only the TV moving, never an API response:
+
+```bash
+curl -s http://localhost:8765/devices        # is the device loaded at all?
+journalctl -u htpc-remote -f                 # warnings while you press
+```
+
+- Nothing in `/devices` → no config; run Setup from the phone
+- `learned` is empty and buttons don't work → the cloud transport is failing. Check the IoT Core subscription hasn't lapsed at [iot.tuya.com](https://iot.tuya.com)
+- Worked before, stopped after re-pairing the hub in Smart Life → **`local_key` changes on re-pair**; re-run Setup
+- Some buttons work, one doesn't → that key may not exist in your TV's codeset
+
+**Teach never captures anything**
+
+Most likely your hub can't report captures — plenty can send but not receive. Symptoms: the capture always times out regardless of how long you hold it open or how many times you press, and the log shows nothing arriving.
+
+Use **Load LG** instead, which needs no remote at all. If your TV isn't LG, add its NEC codes to `KNOWN_CODES` in `server/devices/tuya_ir.py`.
+
 ---
 
 ## How it works
@@ -357,13 +441,25 @@ sudo pacman -S wtype        # Arch
 ```
 Phone browser  ──WebSocket──▶  FastAPI server (port 8765)
                                        │
-                ┌──────────────────────┼──────────────────────┐
-                ▼                      ▼                       ▼
-         X11 (pynput)        Wayland (evdev/uinput)   Windows (pynput)
-         XF86 keysyms        Linux keycodes            Win32 VK codes
+              ┌────────────────────────┴────────────────────────┐
+              ▼                                                  ▼
+      input backend (the HTPC)                       device registry (everything else)
+              │                                                  │
+   ┌──────────┼──────────┐                              ┌────────┴────────┐
+   ▼          ▼          ▼                              ▼                 ▼
+  X11      Wayland    Windows                     local IR (LAN)    Tuya cloud
+ pynput  evdev/uinput  pynput                      DP 201/202       key commands
 ```
 
-The server translates incoming WebSocket messages into real input events using the platform's native API. The overlay (GTK3 on Linux, tkinter on Windows) is driven by the same server via a shared state object — it hides the moment a WebSocket client connects, and shows on startup or after 2 hours of inactivity. Brief disconnects are absorbed by a timer (`GLib.timeout_add_seconds` on Linux, `root.after` on Windows) that resets on every reconnect.
+The server translates incoming WebSocket messages into real input events using the platform's native API. The overlay (GTK3 on Linux, tkinter on Windows) is driven by the same server via a shared state object — it hides the moment a WebSocket client connects, and shows on startup or after 2 hours of inactivity. Brief disconnects are absorbed by a timer (`GLib.timeout_add_seconds` on Linux, `root.after` on Windows) that resets on every reconnect. Setup mode overrides all of that, forcing the overlay open to display the pairing code.
+
+Extra devices live behind a `DeviceBackend` interface that declares **capabilities**. The phone reads them and renders only the controls a device actually supports — an IR blaster reports no `pointer`, so its tab shows a d-pad while the PC tab keeps the trackpad. Adding a backend therefore needs no UI changes.
+
+```python
+capabilities = {"power", "volume", "nav", "media", "input_select", "channel"}
+```
+
+IR sends run in a threadpool so a cloud round trip never stalls mouse movement on the event loop.
 
 ---
 
@@ -372,14 +468,20 @@ The server translates incoming WebSocket messages into real input events using t
 ```
 htpc-remote/
 ├── server/
-│   ├── app.py            FastAPI + WebSocket handler
+│   ├── app.py            FastAPI + WebSocket handler + setup endpoints
 │   ├── overlay.py        GTK3 (Linux) + tkinter (Windows) QR popup
+│   ├── setup.py          Pairing code, LAN/cloud discovery, config writing
+│   ├── state.py          Shared state (clients, server URL, setup mode)
 │   ├── main.py           Entry point (uvicorn thread + overlay main loop)
-│   └── input/
-│       ├── base.py       InputBackend ABC + APP_COMMANDS (Linux + Windows)
-│       ├── x11.py        pynput backend (Linux X11)
-│       ├── wayland.py    evdev/uinput backend (Linux Wayland)
-│       └── windows.py    pynput + Win32 VK backend
+│   ├── input/
+│   │   ├── base.py       InputBackend ABC + APP_COMMANDS (Linux + Windows)
+│   │   ├── x11.py        pynput backend (Linux X11)
+│   │   ├── wayland.py    evdev/uinput backend (Linux Wayland)
+│   │   └── windows.py    pynput + Win32 VK backend
+│   └── devices/
+│       ├── base.py       DeviceBackend ABC + capability flags
+│       ├── tuya_ir.py    Tuya IR blaster: local DP 201/202 + cloud fallback
+│       └── __init__.py   Registry, config loading, hot reload
 ├── web/
 │   ├── index.html        Mobile UI entry point + PWA registration
 │   ├── manifest.json     PWA manifest (name, icons, display mode)
@@ -388,12 +490,16 @@ htpc-remote/
 │       ├── glide-tokens.css      Design tokens (OLED dark, Pop!_OS teal)
 │       ├── glide-ui.jsx          Icon set + shared primitives
 │       ├── glide-connect.jsx     WS connection flow
-│       ├── glide-controller.jsx  Full controller UI
+│       ├── glide-controller.jsx  Controller UI + device tabs + Teach
+│       ├── glide-setup.jsx       In-app device setup (pairing-code gated)
 │       ├── ws.js                 WebSocket manager + rAF batching
 │       └── icons/                App icons (SVG + PNG for manifest + iOS)
 ├── packaging/
-│   ├── DEBIAN/           .deb control files (postinst, prerm, postrm)
-│   └── SPEC/             RPM spec file
+│   ├── DEBIAN/               .deb control files (postinst, prerm, postrm)
+│   ├── SPEC/                 RPM spec file
+│   └── devices.example.json  Template for ~/.config/htpc-remote/devices.json
+├── systemd/
+│   └── htpc-remote.service   Single source of truth, copied by both builds
 ├── .github/workflows/
 │   └── release.yml       CI: builds .deb, .rpm, Windows .zip, Linux .tar.gz
 ├── build-deb.sh          One-command .deb builder (Docker)

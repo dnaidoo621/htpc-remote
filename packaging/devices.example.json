@@ -3,30 +3,31 @@
     "Copy to ~/.config/htpc-remote/devices.json and chmod 600 — it holds secrets.",
     "Override the location with the HTPC_REMOTE_DEVICES environment variable.",
     "",
-    "Getting the values for a Tuya/Smart Life IR blaster:",
+    "You normally do NOT need to write this by hand. Open Glide on your phone,",
+    "tap the gear in the device tab strip, and follow the Setup screen — it",
+    "scans your LAN, reads your Tuya account, and writes this file for you.",
+    "",
+    "Getting the values manually, if you prefer:",
     "  1. pip install tinytuya && python -m tinytuya wizard",
     "     (needs a free iot.tuya.com cloud project linked to your Smart Life",
     "      account; see the wiki page 'TV and IR Control')",
     "  2. The wizard writes devices.json — take 'key' as local_key, plus the",
     "     hub id and the per-TV remote id it lists.",
     "",
-    "Transports:",
+    "Transports, tried in order:",
+    "  local — replays a stored base64 code over the LAN. ~20ms, works with no",
+    "          internet. Used only for actions that actually have a stored code.",
     "  cloud — fires keys from the codeset Smart Life already configured.",
-    "          No learning needed; adds ~200-500ms and needs internet.",
-    "  local — replays learned base64 codes over the LAN. Fast and offline,",
-    "          but OFF by default: many of these hubs are cloud-only for IR.",
+    "          ~200-500ms, needs internet and a live IoT Core subscription.",
     "",
-    "About local_control: set it to true only if your hub really does emit IR",
-    "on local commands. A failed local write is indistinguishable from a good",
-    "one — the session authenticates, the write is acknowledged with",
-    "retcode=0, and nothing is transmitted. A Vizia Smart IR (category wnykq,",
-    "protocol 3.5) behaves exactly like that, while the same commands through",
-    "the cloud work fine. Teach is only offered when local_control is on,",
-    "since capture depends on the same local path.",
+    "Populate the local codes either by teaching them from a physical remote",
+    "(Teach button) or, if your hub can't report captures, with the one-tap",
+    "'Load LG' button which synthesises them from published NEC values.",
     "",
-    "To test: set local_control true, restart, and use Teach. If a real press",
-    "is captured, your hub supports local control. If capture always times",
-    "out, it doesn't — set it back to false and use the cloud transport."
+    "local_control defaults to true and is safe to leave on: local sending is",
+    "only used for actions that have a stored code, and a hub that cannot send",
+    "locally never accumulates any, so everything falls back to the cloud.",
+    "Set it to false only if you want to force cloud-only."
   ],
 
   "devices": [
@@ -42,7 +43,7 @@
       "host": "192.168.1.50",
       "local_key": "XXXXXXXXXXXXXXXX",
       "version": 3.5,
-      "local_control": false,
+      "local_control": true,
 
       "cloud": {
         "region": "eu",
@@ -50,7 +51,7 @@
         "api_secret": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
       },
 
-      "codes_file": "lg_tv_codes.json"
+      "codes_file": "ir_codes.json"
     }
   ]
 }
