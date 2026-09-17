@@ -52,31 +52,71 @@ The popup is smart about when it comes back. Locking your phone, switching apps,
 <tr>
 <td align="center" width="50%">
 
-**Phone — trackpad view**
+**Phone — trackpad**
 
 ![Controller](docs/screen-phone-controller.png)
 
-*Drag to move. Tap to click. Right strip scrolls.*
+*Drag to move, tap to click, right strip scrolls. Quick actions underneath; sections along the bottom.*
 
 </td>
 <td align="center" width="50%">
 
-**Phone — media controls**
+**Phone — media**
 
-![Media drawer](docs/screen-phone-media.png)
+![Media](docs/screen-phone-media.png)
 
-*Swipe up or tap ⊞ to open. Prev / seek / play / seek / next + volume.*
+*Prev / seek / play / seek / next, volume, stop, fullscreen.*
 
 </td>
 </tr>
 <tr>
 <td align="center" width="50%">
 
+**Phone — navigation**
+
+![Nav](docs/screen-phone-nav.png)
+
+*D-pad for Kodi, Netflix, anything full-screen.*
+
+</td>
+<td align="center" width="50%">
+
 **Phone — app launcher**
 
-![Apps drawer](docs/screen-phone-apps.png)
+![Apps](docs/screen-phone-apps.png)
 
 *One tap launches Jellyfin, Plex, Kodi, Netflix, YouTube, Spotify, or browser.*
+
+</td>
+</tr>
+<tr>
+<td align="center" width="50%">
+
+**TV tab — navigation**
+
+![TV nav](docs/screen-phone-tv.png)
+
+*Same layout, driving the TV over IR. Teal dots mark buttons with local codes.*
+
+</td>
+<td align="center" width="50%">
+
+**TV tab — power & source**
+
+![TV power](docs/screen-phone-tv-power.png)
+
+*Discrete On and HDMI 1–4 — idempotent, so reliable even when the app can't know the TV's state.*
+
+</td>
+</tr>
+<tr>
+<td align="center" width="50%">
+
+**TV tab — media**
+
+![TV media](docs/screen-phone-tv-media.png)
+
+*Transport, volume and channel, sent locally in ~20 ms.*
 
 </td>
 <td align="center" width="50%">
@@ -85,11 +125,13 @@ The popup is smart about when it comes back. Locking your phone, switching apps,
 
 ![Connecting](docs/screen-phone-connect.png)
 
-*What you see the moment you open the URL. WebSocket connects automatically.*
+*What you see the moment you open the URL. Connects automatically.*
 
 </td>
 </tr>
 </table>
+
+Regenerate these with `node docs/screenshot.mjs http://<htpc>:8765` — see the header of that file.
 
 ---
 
@@ -216,11 +258,12 @@ The icon that appears is the Glide teal cursor mark. Opening it launches straigh
 | Drag on scroll strip (right side) | Scroll |
 | ▶ / ⏸ quick button | Play / Pause |
 | 🔉 / 🔊 quick buttons | Volume down / up |
-| ⊞ button → Media tab | Full media controls + seek |
-| ⊞ button → Nav tab | D-pad + Back + Fullscreen |
-| ⊞ button → Apps tab | App launcher |
-| ⊞ button → Tune tab | Speed, brightness, sleep |
 | ⌨ button | Open keyboard for text input |
+| **Media** tab (bottom bar) | Full media controls + seek, stop, fullscreen |
+| **Nav** tab | D-pad, OK, Back, fullscreen |
+| **Apps** tab | App launcher |
+| **Tune** tab | Pointer / scroll speed, brightness, sleep |
+| **PC / TV** strip (top) | Switch between the HTPC and any configured device |
 
 ---
 

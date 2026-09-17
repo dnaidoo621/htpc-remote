@@ -104,11 +104,14 @@ function send(obj) {
 function key(k) {
   send({ type: "key", key: k });
 }
+const _qs = new URLSearchParams(location.search);
+const initialTab = (want) => _qs.get("tab") && want.includes(_qs.get("tab")) ? _qs.get("tab") : null;
+const initialDevice = () => _qs.get("device") || null;
 function GlideController({ device = "Living-Room PC" }) {
   const [vol, setVol] = useState(42);
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
-  const [tab, setTab] = useState("pad");
+  const [tab, setTab] = useState(initialTab(["pad", "media", "nav", "apps", "tune"]) || "pad");
   const [kb, setKb] = useState(false);
   const [typed, setTyped] = useState("");
   const [toast, setToast] = useState(null);
@@ -120,7 +123,7 @@ function GlideController({ device = "Living-Room PC" }) {
   const [sens, setSens] = useState(60);
   const [scrollSpd, setScrollSpd] = useState(50);
   const [devices, setDevices] = useState(window.WS.getDevices());
-  const [activeDev, setActiveDev] = useState(null);
+  const [activeDev, setActiveDev] = useState(initialDevice());
   const [setup, setSetup] = useState(false);
   const tRef = useRef(0);
   const hiddenInput = useRef(null);
@@ -135,7 +138,7 @@ function GlideController({ device = "Living-Room PC" }) {
     };
   }, []);
   useEffect(() => {
-    if (activeDev && !devices.some((d) => d.id === activeDev)) setActiveDev(null);
+    if (devices.length && activeDev && !devices.some((d) => d.id === activeDev)) setActiveDev(null);
   }, [devices, activeDev]);
   const dev = devices.find((d) => d.id === activeDev) || null;
   useEffect(() => {
@@ -447,7 +450,7 @@ function DevicePanel({ dev, flash }) {
     (can("power") || can("input_select")) && ["power", "Power", "power"],
     can("learn") && ["tune", "Tune", "sliders"]
   ].filter(Boolean);
-  const [tab, setTab] = useState(TABS[0] ? TABS[0][0] : "nav");
+  const [tab, setTab] = useState(initialTab(TABS.map((t) => t[0])) || (TABS[0] ? TABS[0][0] : "nav"));
   useEffect(() => {
     return window.WS.onLearn((m) => {
       if (m.device !== dev.id) return;
