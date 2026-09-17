@@ -8,7 +8,7 @@
  * deleted automatically during activate).
  */
 
-const CACHE_VERSION = 'glide-v7';
+const CACHE_VERSION = 'glide-v8';
 
 const STATIC_ASSETS = [
   '/',
