@@ -39,8 +39,24 @@
   <!-- PWA service worker -->
   <script>
     if ('serviceWorker' in navigator) {
+      // Installed PWAs only look for a new service worker on a cold launch,
+      // and even then the page that's already open keeps its old scripts.
+      // So: check for updates every time the app comes to the foreground,
+      // and reload the moment a new worker takes over — a deploy then shows
+      // up on the next open without anyone clearing anything.
+      const hadController = !!navigator.serviceWorker.controller;
+      let reloading = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (!hadController || reloading) return;   // first install: nothing to refresh
+        reloading = true;
+        location.reload();
+      });
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js').catch(() => {});
+        navigator.serviceWorker.register('/sw.js').then((reg) => {
+          document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) reg.update().catch(() => {});
+          });
+        }).catch(() => {});
       });
     }
   </script>
