@@ -20,41 +20,55 @@
 <body>
   <div id="app-root"></div>
 
-  <!-- React 18 + Babel — served locally so the app works offline on the LAN -->
+  <!-- React 18 — served locally so the app works offline on the LAN -->
   <script src="/static/react.min.js"></script>
   <script src="/static/react-dom.min.js"></script>
-  <script src="/static/babel.min.js"></script>
 
-  <!-- WS manager — plain JS, must load before JSX -->
+  <!-- WS manager — must load before the UI -->
   <script src="/static/ws.js"></script>
 
-  <!-- Design primitives (icons, slider) -->
-  <script type="text/babel" src="/static/glide-ui.jsx"></script>
-
-  <!-- Controller + connect flow -->
-  <script type="text/babel" src="/static/glide-setup.jsx"></script>
-  <script type="text/babel" src="/static/glide-controller.jsx"></script>
-  <script type="text/babel" src="/static/glide-connect.jsx"></script>
+  <!-- UI, precompiled from the .jsx sources by build-web.sh. No Babel in the
+       browser: that was a 3 MB parse plus a JSX transpile on every launch. -->
+  <script src="/static/glide-ui.js"></script>
+  <script src="/static/glide-setup.js"></script>
+  <script src="/static/glide-controller.js"></script>
+  <script src="/static/glide-connect.js"></script>
 
   <!-- PWA service worker -->
   <script>
     if ('serviceWorker' in navigator) {
       // Installed PWAs only look for a new service worker on a cold launch,
-      // and even then the page that's already open keeps its old scripts.
-      // So: check for updates every time the app comes to the foreground,
-      // and reload the moment a new worker takes over — a deploy then shows
-      // up on the next open without anyone clearing anything.
-      const hadController = !!navigator.serviceWorker.controller;
+      // and even then the already-open page keeps its old scripts. So check
+      // for updates when the app comes to the foreground, and reload when a
+      // NEW VERSION replaces a running one — a deploy then lands on the next
+      // open with nobody clearing anything.
+      //
+      // Only a genuine new version, though. iOS evicts idle service workers,
+      // so reloading on every controllerchange meant each foreground
+      // reinstalled the same worker and reloaded the page: a full second
+      // startup every single open.
       let reloading = false;
-      navigator.serviceWorker.addEventListener('controllerchange', () => {
-        if (!hadController || reloading) return;   // first install: nothing to refresh
-        reloading = true;
-        location.reload();
-      });
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('/sw.js').then((reg) => {
+          reg.addEventListener('updatefound', () => {
+            const incoming = reg.installing;
+            const replacingLive = !!reg.active;   // false on first install or re-install after eviction
+            if (!incoming || !replacingLive) return;
+            incoming.addEventListener('statechange', () => {
+              if (incoming.state === 'activated' && !reloading) {
+                reloading = true;
+                location.reload();
+              }
+            });
+          });
+          // Ask for updates when the app comes to the foreground, at most
+          // every few minutes — one small fetch, so deploys still land on
+          // the next open without hammering the server.
+          let lastCheck = 0;
           document.addEventListener('visibilitychange', () => {
-            if (!document.hidden) reg.update().catch(() => {});
+            if (document.hidden || Date.now() - lastCheck < 5 * 60 * 1000) return;
+            lastCheck = Date.now();
+            reg.update().catch(() => {});
           });
         }).catch(() => {});
       });
@@ -62,18 +76,19 @@
   </script>
 
   <!-- Bootstrap -->
-  <script type="text/babel">
+  <script>
     const params = new URLSearchParams(location.search);
     const debug  = params.get('debug'); // ?debug=controller | ?debug=connected | ?debug=connecting
     const root   = ReactDOM.createRoot(document.getElementById('app-root'));
+    const h      = React.createElement;
     if (debug === 'controller') {
-      root.render(<GlideController device="Living-Room PC (preview)" />);
+      root.render(h(GlideController, { device: 'Living-Room PC (preview)' }));
     } else if (debug === 'connected') {
-      root.render(<GlideConnect device="Living-Room PC (preview)" />);
+      root.render(h(GlideConnect, { device: 'Living-Room PC (preview)' }));
       // patch WS to fire connect immediately
       setTimeout(() => window.WS._dbgConnect && window.WS._dbgConnect(), 100);
     } else {
-      root.render(<GlideConnect device="Living-Room PC" />);
+      root.render(h(GlideConnect, { device: 'Living-Room PC' }));
     }
   </script>
 </body>
