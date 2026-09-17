@@ -44,7 +44,7 @@ function GlideController({ device = 'Living-Room PC' }) {
   const [vol,      setVol]      = useState(42);
   const [playing,  setPlaying]  = useState(false);
   const [muted,    setMuted]    = useState(false);
-  const [tab,      setTab]      = useState(null);   // null | media | nav | apps | tune
+  const [tab,      setTab]      = useState('pad');  // pad | media | nav | apps | tune
   const [kb,       setKb]       = useState(false);
   const [typed,    setTyped]    = useState('');
   const [toast,    setToast]    = useState(null);
@@ -160,15 +160,14 @@ function GlideController({ device = 'Living-Room PC' }) {
 
   const onStripUp = () => { sdown.current = null; setTimeout(() => setScrubY(null), 500); };
 
-  /* ── drawer ── */
-  const openDrawer = (t = 'media') => setTab(t);
-  const hRef = useRef(null);
-  const onHandleDown = (e) => {
-    const y0 = e.clientY;
-    const move = (ev) => { if (y0 - ev.clientY > 28) { openDrawer('media'); cleanup(); } };
-    const cleanup = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', cleanup); };
-    window.addEventListener('pointermove', move); window.addEventListener('pointerup', cleanup);
-  };
+  /* ── section tabs (bottom bar) ── */
+  const SECTIONS = [
+    ['pad',   'Pad',   'cursor'],
+    ['media', 'Media', 'play'],
+    ['nav',   'Nav',   'ok'],
+    ['apps',  'Apps',  'apps'],
+    ['tune',  'Tune',  'sliders'],
+  ];
 
   const volIcon = muted ? 'mute' : vol < 38 ? 'volLow' : 'volume';
 
@@ -199,7 +198,7 @@ function GlideController({ device = 'Living-Room PC' }) {
           </div>
         </div>
         <div style={{ flex: 1 }} />
-        <button className="g-press" onPointerDown={() => { setTab(null); setKb(false); window.location.reload(); }}
+        <button className="g-press" onPointerDown={() => { setKb(false); window.location.reload(); }}
           style={{ ...glass, width: 38, height: 38, borderRadius: 999, color: 'var(--g-text-2)', border: '0.75px solid var(--g-line)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <GIcon name="link" size={18} sw={2} />
         </button>
@@ -208,11 +207,11 @@ function GlideController({ device = 'Living-Room PC' }) {
       {/* device tabs, plus a way in to setup when nothing is configured yet */}
       <div style={{ display: 'flex', gap: 4, padding: 4, marginBottom: 10, borderRadius: 14,
         background: 'rgba(0,0,0,0.3)', position: 'relative', zIndex: 2 }}>
-        <button onClick={() => { setActiveDev(null); setTab(null); }} style={seg(activeDev === null)}>
+        <button onClick={() => { setActiveDev(null); setTab('pad'); }} style={seg(activeDev === null)}>
           <GIcon name="mouse" size={15} />PC
         </button>
         {devices.map((d) => (
-          <button key={d.id} onClick={() => { setActiveDev(d.id); setTab(null); }}
+          <button key={d.id} onClick={() => { setActiveDev(d.id); setTab('pad'); }}
             style={seg(activeDev === d.id)}>
             <GIcon name="film" size={15} />{d.name}
           </button>
@@ -225,6 +224,9 @@ function GlideController({ device = 'Living-Room PC' }) {
       </div>
 
       {dev ? <DevicePanel dev={dev} flash={flash} /> : <>
+
+      {/* ── PAD ── */}
+      {tab === 'pad' && <>
       {/* trackpad + scroll strip */}
       <div style={{ flex: 1, display: 'flex', gap: 10, position: 'relative', zIndex: 1, minHeight: 0 }}>
         {/* trackpad */}
@@ -280,14 +282,8 @@ function GlideController({ device = 'Living-Room PC' }) {
         </GBtn>
       </div>
 
-      {/* swipe-up handle */}
-      <div ref={hRef} onPointerDown={onHandleDown} onClick={() => openDrawer('media')}
-        style={{ display: 'flex', justifyContent: 'center', padding: '11px 0 5px', cursor: 'grab', position: 'relative', zIndex: 1 }}>
-        <div style={{ width: 40, height: 5, borderRadius: 999, background: 'var(--g-glass-hi)' }} />
-      </div>
-
-      {/* quick action bar */}
-      <div style={{ display: 'flex', gap: 8, height: 52, position: 'relative', zIndex: 1 }}>
+      {/* quick actions — the things you want without leaving the pad */}
+      <div style={{ display: 'flex', gap: 8, height: 52, marginTop: 10, position: 'relative', zIndex: 1 }}>
         <GBtn flex={1} onPress={() => setKb(true)}>
           <GIcon name="keyboard" size={20} />
         </GBtn>
@@ -300,9 +296,34 @@ function GlideController({ device = 'Living-Room PC' }) {
         <GBtn flex={1} onPress={() => { setVol((v) => Math.min(100, v + 6)); setMuted(false); key('volume_up'); flash('Vol +'); }}>
           <GIcon name="volume" size={20} />
         </GBtn>
-        <GBtn flex={1} onPress={() => openDrawer('media')} active={tab != null}>
-          <GIcon name="apps" size={18} />
-        </GBtn>
+      </div>
+      </>}
+
+      {/* ── OTHER SECTIONS ── each fills the space the pad would, scrolling if needed */}
+      {tab !== 'pad' && (
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', position: 'relative', zIndex: 1,
+          display: 'flex', flexDirection: 'column',
+          // short panels (media, nav) sit centred; long ones (apps, tune) start at the top
+          justifyContent: tab === 'apps' || tab === 'tune' ? 'flex-start' : 'center',
+          paddingTop: 4 }}>
+          {tab === 'media' && <DrawerMedia {...{ playing, setPlaying, vol, setVol, muted, setMuted, flash }} />}
+          {tab === 'nav'   && <DrawerNav   flash={flash} />}
+          {tab === 'apps'  && <DrawerApps  flash={flash} />}
+          {tab === 'tune'  && <DrawerTune  {...{ uiBright, setUiBright, sens, setSens, scrollSpd, setScrollSpd, flash }} />}
+        </div>
+      )}
+
+      {/* ── BOTTOM TAB BAR ── */}
+      <div style={{ display: 'flex', gap: 4, padding: 4, marginTop: 12, borderRadius: 16,
+        background: 'rgba(0,0,0,0.3)', position: 'relative', zIndex: 2, flexShrink: 0 }}>
+        {SECTIONS.map(([k, label, icon]) => (
+          <button key={k} onClick={() => setTab(k)}
+            style={{ ...seg(tab === k), flexDirection: 'column', gap: 3, padding: '8px 0 6px',
+              fontSize: 10.5, letterSpacing: 0.3 }}>
+            <GIcon name={icon} size={19} />
+            {label}
+          </button>
+        ))}
       </div>
       </>}
 
@@ -316,35 +337,6 @@ function GlideController({ device = 'Living-Room PC' }) {
           animation: 'g-toast-in .22s ease-out', zIndex: 30, whiteSpace: 'nowrap',
         }}>{toast.t}</div>
       )}
-
-      {/* ── DRAWER ── */}
-      {tab != null && <>
-        <div onClick={() => setTab(null)} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 40, animation: 'g-qr-fade .2s' }} />
-        <div style={{
-          position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 41,
-          padding: '10px 14px 30px', borderRadius: '28px 28px 48px 48px',
-          background: 'rgba(16,21,28,0.86)', backdropFilter: 'blur(var(--g-blur-lg)) saturate(160%)',
-          WebkitBackdropFilter: 'blur(var(--g-blur-lg)) saturate(160%)',
-          border: '0.75px solid var(--g-line)', borderBottom: 'none',
-          boxShadow: '0 -20px 50px rgba(0,0,0,0.5)', maxHeight: '72%',
-          display: 'flex', flexDirection: 'column', overflowY: 'auto',
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'center', paddingBottom: 12 }}>
-            <div style={{ width: 40, height: 5, borderRadius: 999, background: 'var(--g-glass-hi)' }} />
-          </div>
-          {/* tabs */}
-          <div style={{ display: 'flex', gap: 4, padding: 4, borderRadius: 16, background: 'rgba(0,0,0,0.3)', marginBottom: 16 }}>
-            {[['media','Media'],['nav','Nav'],['apps','Apps'],['tune','Tune']].map(([k, l]) => (
-              <button key={k} onClick={() => setTab(k)} style={seg(tab === k)}>{l}</button>
-            ))}
-          </div>
-
-          {tab === 'media' && <DrawerMedia {...{ playing, setPlaying, vol, setVol, muted, setMuted, flash }} />}
-          {tab === 'nav'   && <DrawerNav   flash={flash} />}
-          {tab === 'apps'  && <DrawerApps  flash={flash} />}
-          {tab === 'tune'  && <DrawerTune  {...{ uiBright, setUiBright, sens, setSens, scrollSpd, setScrollSpd, flash }} />}
-        </div>
-      </>}
 
       {/* ── KEYBOARD SHEET ── */}
       {kb && <KeyboardSheet {...{ typed, setTyped, setKb, flash, hiddenInput }} />}
