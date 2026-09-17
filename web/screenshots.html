@@ -14,20 +14,20 @@
   <div id="app-root"></div>
   <script src="/static/react.min.js"></script>
   <script src="/static/react-dom.min.js"></script>
-  <script src="/static/babel.min.js"></script>
   <script src="/static/ws.js"></script>
-  <script type="text/babel" src="/static/glide-ui.jsx"></script>
-  <script type="text/babel" src="/static/glide-desktop.jsx"></script>
-  <script type="text/babel" src="/static/glide-controller.jsx"></script>
-  <script type="text/babel" src="/static/glide-connect.jsx"></script>
-  <script type="text/babel">
+  <script src="/static/glide-ui.js"></script>
+  <script src="/static/glide-desktop.js"></script>
+  <script src="/static/glide-controller.js"></script>
+  <script src="/static/glide-connect.js"></script>
+  <script>
     const p = new URLSearchParams(location.search);
     const scene = p.get('scene') || 'waiting';
     const root = ReactDOM.createRoot(document.getElementById('app-root'));
-    if (scene === 'waiting')    root.render(<DesktopPopup connected={false} />);
-    if (scene === 'connected')  root.render(<DesktopPopup connected={true} device="iPhone 15 Pro" />);
-    if (scene === 'connect')    root.render(<GlideConnect startStep="pair" device="Living-Room PC" auto={false} />);
-    if (scene === 'controller') root.render(<GlideController device="Living-Room PC" />);
+    const h = React.createElement;
+    if (scene === 'waiting')    root.render(h(DesktopPopup, { connected: false }));
+    if (scene === 'connected')  root.render(h(DesktopPopup, { connected: true, device: 'iPhone 15 Pro' }));
+    if (scene === 'connect')    root.render(h(GlideConnect, { startStep: 'pair', device: 'Living-Room PC', auto: false }));
+    if (scene === 'controller') root.render(h(GlideController, { device: 'Living-Room PC' }));
   </script>
 </body>
 </html>

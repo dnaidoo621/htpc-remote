@@ -17,7 +17,7 @@ cd "$(dirname "$0")/web/static"
 # is installed into the project.
 ESBUILD="npx -y esbuild@0.24.2"
 
-for src in glide-ui glide-setup glide-controller glide-connect; do
+for src in glide-ui glide-setup glide-controller glide-connect glide-desktop; do
   # No bundling and no module wrapper: each file stays a classic script whose
   # top-level declarations are shared globals, exactly as the JSX was loaded.
   $ESBUILD "$src.jsx" \

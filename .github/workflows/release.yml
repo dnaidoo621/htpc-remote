@@ -36,12 +36,12 @@ jobs:
     needs: version
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build .deb (debian:bookworm-slim via Docker)
         run: bash build-deb.sh ${{ needs.version.outputs.version }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pkg-deb
           path: '*.deb'
@@ -51,12 +51,12 @@ jobs:
     needs: version
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build .rpm (fedora:latest via Docker)
         run: bash build-rpm.sh ${{ needs.version.outputs.version }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pkg-rpm
           path: '*.rpm'
@@ -68,7 +68,7 @@ jobs:
     env:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build Windows ZIP
         run: |
@@ -88,7 +88,7 @@ jobs:
           zip -r "${GITHUB_WORKSPACE}/htpc-remote-${VERSION}-windows.zip" \
               "htpc-remote-${VERSION}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pkg-windows
           path: '*-windows.zip'
@@ -101,7 +101,7 @@ jobs:
     env:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build Linux tarball
         run: |
@@ -121,7 +121,7 @@ jobs:
               -czf "${GITHUB_WORKSPACE}/htpc-remote-${VERSION}-linux.tar.gz" \
               "htpc-remote-${VERSION}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pkg-linux-tar
           path: '*-linux.tar.gz'
@@ -134,7 +134,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           merge-multiple: true
           path: dist

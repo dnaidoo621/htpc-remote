@@ -11,13 +11,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ── 0. Refuse to package stale UI ────────────────────────────────────────────
 # The .jsx sources are compiled to .js by build-web.sh and committed. If a
 # .jsx is newer than its .js, someone edited the UI and forgot to rebuild.
-for src in "$SCRIPT_DIR"/web/static/*.jsx; do
-    out="${src%.jsx}.js"
-    if [ ! -f "$out" ] || [ "$src" -nt "$out" ]; then
-        echo "ERROR: $(basename "$src") is newer than $(basename "$out") — run ./build-web.sh first" >&2
-        exit 1
-    fi
-done
+# Skipped in CI: a fresh checkout gives every file the same moment, and
+# .jsx happens to sort after .js, so the mtime comparison would always fail
+# there. CI ships whatever is committed; the check is for local builds.
+if [ -z "${CI:-}" ]; then
+    for src in "$SCRIPT_DIR"/web/static/*.jsx; do
+        out="${src%.jsx}.js"
+        if [ ! -f "$out" ] || [ "$src" -nt "$out" ]; then
+            echo "ERROR: $(basename "$src") is newer than $(basename "$out") — run ./build-web.sh first" >&2
+            exit 1
+        fi
+    done
+fi
 
 BUILD_DIR="$SCRIPT_DIR/.rpm-build"
 
@@ -43,6 +48,9 @@ rsync -a \
     --exclude '*.pyc' \
     --exclude '.gitignore' \
     --exclude '.DS_Store' \
+    --exclude='screenshots.html' \
+    --exclude='glide-desktop.js' \
+    --exclude='glide-desktop.jsx' \
     --exclude '._*' \
     "$SCRIPT_DIR/" "$SRCDIR/"
 
