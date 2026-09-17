@@ -8,20 +8,19 @@
  * deleted automatically during activate).
  */
 
-const CACHE_VERSION = 'glide-v9';
+const CACHE_VERSION = 'glide-v10';
 
 const STATIC_ASSETS = [
   '/',
   '/manifest.json',
   '/static/glide-tokens.css',
   '/static/ws.js',
-  '/static/glide-ui.jsx',
-  '/static/glide-connect.jsx',
-  '/static/glide-controller.jsx',
-  '/static/glide-setup.jsx',
+  '/static/glide-ui.js',
+  '/static/glide-connect.js',
+  '/static/glide-controller.js',
+  '/static/glide-setup.js',
   '/static/react.min.js',
   '/static/react-dom.min.js',
-  '/static/babel.min.js',
   '/static/icons/icon-192.png',
   '/static/icons/icon-512.png',
   '/static/icons/icon.svg',

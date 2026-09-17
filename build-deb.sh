@@ -7,6 +7,18 @@ VERSION="${1:-1.0.0}"
 PKG_NAME="htpc-remote"
 DEB_NAME="${PKG_NAME}_${VERSION}_all.deb"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# ── 0. Refuse to package stale UI ────────────────────────────────────────────
+# The .jsx sources are compiled to .js by build-web.sh and committed. If a
+# .jsx is newer than its .js, someone edited the UI and forgot to rebuild.
+for src in "$SCRIPT_DIR"/web/static/*.jsx; do
+    out="${src%.jsx}.js"
+    if [ ! -f "$out" ] || [ "$src" -nt "$out" ]; then
+        echo "ERROR: $(basename "$src") is newer than $(basename "$out") — run ./build-web.sh first" >&2
+        exit 1
+    fi
+done
+
 BUILD_DIR="$SCRIPT_DIR/.deb-build"
 PKG_ROOT="$BUILD_DIR/pkg"
 
