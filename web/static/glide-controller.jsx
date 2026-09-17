@@ -68,12 +68,19 @@ function Section({ centred, children }) {
 function send(obj) { window.WS.send(obj); }
 function key(k)   { send({ type: 'key', key: k }); }
 
+/* Deep-link params: ?device=tv&tab=nav opens straight to that view. Handy
+   for a home-screen bookmark to the TV, and how the README screenshots are
+   generated reproducibly. */
+const _qs = new URLSearchParams(location.search);
+const initialTab    = (want) => (_qs.get('tab') && want.includes(_qs.get('tab'))) ? _qs.get('tab') : null;
+const initialDevice = () => _qs.get('device') || null;
+
 /* ── main controller ── */
 function GlideController({ device = 'Living-Room PC' }) {
   const [vol,      setVol]      = useState(42);
   const [playing,  setPlaying]  = useState(false);
   const [muted,    setMuted]    = useState(false);
-  const [tab,      setTab]      = useState('pad');  // pad | media | nav | apps | tune
+  const [tab,      setTab]      = useState(initialTab(['pad','media','nav','apps','tune']) || 'pad');
   const [kb,       setKb]       = useState(false);
   const [typed,    setTyped]    = useState('');
   const [toast,    setToast]    = useState(null);
@@ -85,7 +92,7 @@ function GlideController({ device = 'Living-Room PC' }) {
   const [sens,     setSens]     = useState(60);
   const [scrollSpd,setScrollSpd]= useState(50);
   const [devices,  setDevices]  = useState(window.WS.getDevices());
-  const [activeDev,setActiveDev]= useState(null);   // null = the HTPC itself
+  const [activeDev,setActiveDev]= useState(initialDevice());   // null = the HTPC itself
   const [setup,    setSetup]    = useState(false);
 
   const tRef      = useRef(0);
@@ -99,9 +106,11 @@ function GlideController({ device = 'Living-Room PC' }) {
     return () => { off1(); off2(); off3(); };
   }, []);
 
-  /* A device tab is only meaningful while it still exists. */
+  /* A device tab is only meaningful while it still exists. Wait for the
+     list to actually arrive, or a deep-linked ?device= is cleared on the
+     very first render. */
   useEffect(() => {
-    if (activeDev && !devices.some((d) => d.id === activeDev)) setActiveDev(null);
+    if (devices.length && activeDev && !devices.some((d) => d.id === activeDev)) setActiveDev(null);
   }, [devices, activeDev]);
 
   const dev = devices.find((d) => d.id === activeDev) || null;
@@ -381,7 +390,7 @@ function DevicePanel({ dev, flash }) {
     (can('power') || can('input_select')) && ['power', 'Power', 'power'],
     can('learn')                        && ['tune',  'Tune',  'sliders'],
   ].filter(Boolean);
-  const [tab, setTab] = useState(TABS[0] ? TABS[0][0] : 'nav');
+  const [tab, setTab] = useState(initialTab(TABS.map((t) => t[0])) || (TABS[0] ? TABS[0][0] : 'nav'));
 
   /* learn progress from the server */
   useEffect(() => {

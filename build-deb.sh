@@ -57,6 +57,7 @@ rsync -a \
     --exclude='*.pyc' \
     --exclude='.gitignore' \
     --exclude='.DS_Store' \
+    --exclude='docs' \
     --exclude='screenshots.html' \
     --exclude='glide-desktop.js' \
     --exclude='glide-desktop.jsx' \
