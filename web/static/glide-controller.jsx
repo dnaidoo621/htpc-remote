@@ -36,6 +36,35 @@ const seg = (on) => ({
   display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, transition: 'all .15s',
 });
 
+/* ── bottom tab bar, shared by the PC and every device page ── */
+function TabBar({ tabs, active, onChange }) {
+  return (
+    <div style={{ display: 'flex', gap: 4, padding: 4, marginTop: 12, borderRadius: 16,
+      background: 'rgba(0,0,0,0.3)', position: 'relative', zIndex: 2, flexShrink: 0 }}>
+      {tabs.map(([k, label, icon]) => (
+        <button key={k} onClick={() => onChange(k)}
+          style={{ ...seg(active === k), flexDirection: 'column', gap: 3, padding: '8px 0 6px',
+            fontSize: 10.5, letterSpacing: 0.3 }}>
+          <GIcon name={icon} size={19} />
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/* Content area under the header, above the tab bar. Short panels sit
+   centred; long ones start at the top and scroll. */
+function Section({ centred, children }) {
+  return (
+    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', position: 'relative', zIndex: 1,
+      display: 'flex', flexDirection: 'column', gap: 12,
+      justifyContent: centred ? 'center' : 'flex-start', paddingTop: 4 }}>
+      {children}
+    </div>
+  );
+}
+
 function send(obj) { window.WS.send(obj); }
 function key(k)   { send({ type: 'key', key: k }); }
 
@@ -223,7 +252,7 @@ function GlideController({ device = 'Living-Room PC' }) {
         </button>
       </div>
 
-      {dev ? <DevicePanel dev={dev} flash={flash} /> : <>
+      {dev ? <DevicePanel key={dev.id} dev={dev} flash={flash} /> : <>
 
       {/* ── PAD ── */}
       {tab === 'pad' && <>
@@ -299,32 +328,17 @@ function GlideController({ device = 'Living-Room PC' }) {
       </div>
       </>}
 
-      {/* ── OTHER SECTIONS ── each fills the space the pad would, scrolling if needed */}
+      {/* ── OTHER SECTIONS ── */}
       {tab !== 'pad' && (
-        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', position: 'relative', zIndex: 1,
-          display: 'flex', flexDirection: 'column',
-          // short panels (media, nav) sit centred; long ones (apps, tune) start at the top
-          justifyContent: tab === 'apps' || tab === 'tune' ? 'flex-start' : 'center',
-          paddingTop: 4 }}>
+        <Section centred={tab === 'media' || tab === 'nav'}>
           {tab === 'media' && <DrawerMedia {...{ playing, setPlaying, vol, setVol, muted, setMuted, flash }} />}
           {tab === 'nav'   && <DrawerNav   flash={flash} />}
           {tab === 'apps'  && <DrawerApps  flash={flash} />}
           {tab === 'tune'  && <DrawerTune  {...{ uiBright, setUiBright, sens, setSens, scrollSpd, setScrollSpd, flash }} />}
-        </div>
+        </Section>
       )}
 
-      {/* ── BOTTOM TAB BAR ── */}
-      <div style={{ display: 'flex', gap: 4, padding: 4, marginTop: 12, borderRadius: 16,
-        background: 'rgba(0,0,0,0.3)', position: 'relative', zIndex: 2, flexShrink: 0 }}>
-        {SECTIONS.map(([k, label, icon]) => (
-          <button key={k} onClick={() => setTab(k)}
-            style={{ ...seg(tab === k), flexDirection: 'column', gap: 3, padding: '8px 0 6px',
-              fontSize: 10.5, letterSpacing: 0.3 }}>
-            <GIcon name={icon} size={19} />
-            {label}
-          </button>
-        ))}
-      </div>
+      <TabBar tabs={SECTIONS} active={tab} onChange={setTab} />
       </>}
 
       {/* toast */}
@@ -358,6 +372,16 @@ function DevicePanel({ dev, flash }) {
   const can  = (c) => dev.capabilities.includes(c);
   const has  = (a) => dev.actions.includes(a);
   const isLearned = (a) => (dev.learned || []).includes(a);
+
+  // Same bar as the PC page. Tabs only exist for capabilities the device
+  // reports, so a hub without learning simply has no Tune tab.
+  const TABS = [
+    can('nav')                          && ['nav',   'Nav',   'ok'],
+    (can('media') || can('volume'))     && ['media', 'Media', 'play'],
+    (can('power') || can('input_select')) && ['power', 'Power', 'power'],
+    can('learn')                        && ['tune',  'Tune',  'sliders'],
+  ].filter(Boolean);
+  const [tab, setTab] = useState(TABS[0] ? TABS[0][0] : 'nav');
 
   /* learn progress from the server */
   useEffect(() => {
@@ -422,13 +446,7 @@ function DevicePanel({ dev, flash }) {
   const blank = <div />;
   const hdmis = ['hdmi1', 'hdmi2', 'hdmi3', 'hdmi4'].filter(has);
 
-  return (
-    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex',
-      flexDirection: 'column', gap: 12, position: 'relative', zIndex: 1, paddingBottom: 4 }}>
-
-      {/* learn mode — teaches the hub straight from a physical remote, so the
-          device keeps working without any cloud account */}
-      {can('learn') && (
+  const teachBanner = can('learn') && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px',
           borderRadius: 14, ...glass,
           ...(learnMode ? { borderColor: 'var(--g-accent)', background: 'var(--g-accent-dim)' } : {}) }}>
@@ -462,10 +480,9 @@ function DevicePanel({ dev, flash }) {
             {learnMode ? 'Done' : 'Teach'}
           </button>
         </div>
-      )}
+      );
 
-      {/* capture prompt */}
-      {capturing && (
+  const capturePrompt = capturing && (
         <div onClick={() => setCapturing(null)}
           style={{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(0,0,0,0.72)',
             backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center',
@@ -483,64 +500,106 @@ function DevicePanel({ dev, flash }) {
             </div>
           </div>
         </div>
-      )}
+      );
 
+  return (<>
+    {capturePrompt}
 
-      {/* power — 'power_on' is discrete, so it's the safe primary */}
-      {can('power') && row(<>
-        {btn('power_on', 'On', 'power', { accent: true })}
-        {btn('power', 'Toggle', 'power')}
-        {btn('input', 'Source', 'film')}
-      </>)}
+    {/* while teaching from another tab, keep a reminder visible */}
+    {learnMode && tab !== 'tune' && (
+      <div onClick={() => setLearnMode(false)} style={{ display: 'flex', alignItems: 'center', gap: 8,
+        padding: '7px 12px', marginBottom: 8, borderRadius: 12, cursor: 'pointer',
+        background: 'var(--g-accent-dim)', border: '0.75px solid var(--g-accent)',
+        position: 'relative', zIndex: 2, flexShrink: 0 }}>
+        <span className="g-live-dot" style={{ width: 8, height: 8, borderRadius: 999,
+          background: 'var(--g-accent)', flexShrink: 0 }} />
+        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--g-accent)', flex: 1 }}>
+          Teach mode — tap a button to capture it
+        </span>
+        <span className="g-mono" style={{ fontSize: 10.5, color: 'var(--g-accent)' }}>done</span>
+      </div>
+    )}
 
-      {/* direct source selection — idempotent, unlike cycling with 'input' */}
-      {can('input_select') && hdmis.length > 0 && row(
-        hdmis.map((h) => btn(h, h.toUpperCase().replace('HDMI', 'HDMI '), null,
-          { showLabel: true })), 44)}
-
-      {/* d-pad */}
-      {can('nav') && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)',
-          gridAutoRows: 58, gap: 8, maxWidth: 250, margin: '2px auto', width: '100%' }}>
-          {blank}{dpad('up', 'chevUp')}{blank}
-          {dpad('left', 'chevLeft')}
-          <GBtn accent onPress={() => fire('ok', 'OK')} style={{ borderRadius: 999 }}>
-            <GIcon name="ok" size={22} />
-          </GBtn>
-          {dpad('right', 'chevRight')}
-          {blank}{dpad('down', 'chevDown')}{blank}
-        </div>
-      )}
-
-      {can('nav') && row(<>
+    {/* ── NAV ── the TV's equivalent of the pad: d-pad, then the things you
+        want without leaving it (like the pad's quick-action row) */}
+    {tab === 'nav' && <Section centred>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)',
+        gridAutoRows: 64, gap: 8, maxWidth: 270, margin: '0 auto', width: '100%' }}>
+        {blank}{dpad('up', 'chevUp')}{blank}
+        {dpad('left', 'chevLeft')}
+        <GBtn accent onPress={() => fire('ok', 'OK')} style={{ borderRadius: 999 }}>
+          <GIcon name="ok" size={22} />
+        </GBtn>
+        {dpad('right', 'chevRight')}
+        {blank}{dpad('down', 'chevDown')}{blank}
+      </div>
+      {row(<>
         {btn('back', 'Back', 'esc')}
         {btn('home', 'Home', 'apps')}
         {btn('menu', 'Menu', 'sliders')}
       </>, 48)}
+      {row(<>
+        {btn('power_on', 'On', 'power', { showLabel: false })}
+        {btn('volume_down', 'Vol −', 'volLow', { showLabel: false })}
+        {btn('mute', 'Mute', 'mute', { showLabel: false })}
+        {btn('volume_up', 'Vol +', 'volume', { showLabel: false })}
+      </>, 52)}
+    </Section>}
 
-      {/* volume */}
+    {/* ── MEDIA ── */}
+    {tab === 'media' && <Section centred>
+      {can('media') && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+          {btn('previous', 'Prev', 'prev', { showLabel: false, flex: 'none', style: { width: 56, height: 56, borderRadius: 999 } })}
+          {btn('rewind', 'Rew', 'back10', { showLabel: false, flex: 'none', style: { width: 56, height: 56, borderRadius: 999 } })}
+          {btn('play', 'Play', 'play', { showLabel: false, flex: 'none', accent: true, iconSize: 28, style: { width: 72, height: 72, borderRadius: 999 } })}
+          {btn('pause', 'Pause', 'pause', { showLabel: false, flex: 'none', style: { width: 56, height: 56, borderRadius: 999 } })}
+          {btn('forward', 'Fwd', 'fwd10', { showLabel: false, flex: 'none', style: { width: 56, height: 56, borderRadius: 999 } })}
+        </div>
+      )}
       {can('volume') && row(<>
         {btn('volume_down', 'Vol −', 'volLow', { showLabel: false, flex: 1.3 })}
         {btn('mute', 'Mute', 'mute', { showLabel: false })}
         {btn('volume_up', 'Vol +', 'volume', { showLabel: false, flex: 1.3 })}
       </>)}
-
-      {/* transport */}
-      {can('media') && row(<>
-        {btn('previous', 'Prev', 'prev', { showLabel: false })}
-        {btn('rewind', 'Rew', 'back10', { showLabel: false })}
-        {btn('play', 'Play', 'play', { showLabel: false })}
-        {btn('pause', 'Pause', 'pause', { showLabel: false })}
-        {btn('forward', 'Fwd', 'fwd10', { showLabel: false })}
-      </>, 50)}
-
-      {/* channels */}
       {can('channel') && row(<>
         {btn('channel_down', 'Ch −', 'chevDown')}
         {btn('channel_up', 'Ch +', 'chevUp')}
-      </>, 46)}
-    </div>
-  );
+      </>, 48)}
+      {can('media') && row(<>
+        {btn('stop', 'Stop', 'film')}
+      </>, 48)}
+    </Section>}
+
+    {/* ── POWER / SOURCE ── 'power_on' and the HDMI keys are discrete, so
+        they're reliable even when the app can't know the TV's state */}
+    {tab === 'power' && <Section centred>
+      {can('power') && row(<>
+        {btn('power_on', 'On', 'power', { accent: true })}
+        {btn('power', 'Toggle', 'power')}
+      </>, 64)}
+      {can('input_select') && (<>
+        {has('input') && row(<>{btn('input', 'Cycle source', 'film')}</>, 48)}
+        {hdmis.length > 0 && row(
+          hdmis.map((h) => btn(h, h.toUpperCase().replace('HDMI', 'HDMI '), null,
+            { showLabel: true })), 56)}
+      </>)}
+    </Section>}
+
+    {/* ── TUNE ── learning and code management */}
+    {tab === 'tune' && <Section>
+      {teachBanner}
+      {learnMode && (
+        <div className="g-mono" style={{ fontSize: 11, color: 'var(--g-text-3)', lineHeight: 1.5,
+          padding: '0 4px' }}>
+          Switch to Nav, Media or Power and tap any button to capture it from your remote.
+          Learned buttons show a teal dot. Tap one again to forget it.
+        </div>
+      )}
+    </Section>}
+
+    <TabBar tabs={TABS} active={tab} onChange={setTab} />
+  </>);
 }
 
 /* ── drawer: media ── */
