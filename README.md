@@ -404,6 +404,10 @@ sudo dnf install wtype      # Fedora
 sudo pacman -S wtype        # Arch
 ```
 
+**Keys work in Kodi/browser but not in Stremio, Plex desktop, or Spotify (Linux X11)**
+
+Those are Chromium/Electron apps, and they silently drop key events sent through pynput's keyboard controller while GTK and Qt apps accept them. Glide sends key presses via XTEST directly for this reason — if you're on an older build, update. Players with non-standard shortcuts are handled by `_APP_PROFILES` in `server/input/x11.py`, matched on the window title; Stremio's seek/next/stop are mapped there because its MPRIS ignores commands.
+
 **"Another instance is already running on 8765"**
 
 You have both a system-level and a per-user service enabled. Keep one:
